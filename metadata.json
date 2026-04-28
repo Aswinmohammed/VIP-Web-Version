@@ -1,0 +1,5 @@
+{
+  "name": "VIP Tailors",
+  "description": "A comprehensive, offline-first desktop application for tailors to manage customers, orders, measurements, inventory, and generate invoices. Built with React and Tailwind CSS.",
+  "requestFramePermissions": []
+}

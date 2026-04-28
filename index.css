@@ -1,0 +1,61 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure Recharts SVGs don't clip during canvas capture */
+svg {
+  overflow: visible !important;
+}
+
+.recharts-responsive-container {
+  overflow: visible !important;
+}
+
+@media print {
+  /* Hide sidebar and navigation elements */
+  aside, 
+  nav, 
+  button, 
+  .no-print,
+  .flex-col.sm\:flex-row.justify-between.items-center.gap-4 {
+    display: none !important;
+  }
+
+  /* Reset main container for printing */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  body {
+    background-color: white !important;
+  }
+
+  /* Ensure the containers take full width for the "print" state captured by html2canvas */
+  .max-w-4xl, .max-w-5xl, .rounded-3xl, .rounded-xl {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Fix page breaks */
+  .print-break-inside-avoid {
+    page-break-inside: avoid;
+  }
+}
