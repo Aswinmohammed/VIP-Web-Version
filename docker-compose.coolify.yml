@@ -15,6 +15,9 @@ services:
       VIP_SMS_API_KEY: ${VIP_SMS_API_KEY:-}
     expose:
       - "8000"
+    networks:
+      - default
+      - coolify
 
   frontend:
     build:
@@ -23,5 +26,10 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
-    ports:
-      - "80:80"
+    expose:
+      - "80"
+
+networks:
+  coolify:
+    external: true
+    name: coolify
