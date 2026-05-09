@@ -333,29 +333,49 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
     return { final, paid, balance };
   };
 
-  const handleMarkDelivered = (orderId: string) => {
-    setOrders(prev => prev.map(o => {
-      if (o.id !== orderId) return o;
-      const c = computeFinal(o);
-      let updatedOrder = { ...o, status: 'Delivered' as const };
-      if (c.balance > 0) {
-        updatedOrder.payments = [...(o.payments || []), {
-          id: `PAY-${Date.now()}`,
-          branchId: o.branchId || activeBranchId,
-          collectorId: currentUser?.id || 'SYSTEM',
-          amount: c.balance,
-          date: new Date().toISOString().split('T')[0],
-          note: 'Delivery Pmnt'
-        }];
+  const handleMarkDelivered = async (orderId: string) => {
+    const orderToUpdate = orders.find(o => o.id === orderId);
+    if (!orderToUpdate) return;
+    const c = computeFinal(orderToUpdate);
+    let updatedOrder = { ...orderToUpdate, status: 'Delivered' as const };
+    if (c.balance > 0) {
+      updatedOrder.payments = [...(orderToUpdate.payments || []), {
+        id: `PAY-${Date.now()}`,
+        branchId: orderToUpdate.branchId || activeBranchId,
+        collectorId: currentUser?.id || 'SYSTEM',
+        amount: c.balance,
+        date: new Date().toISOString().split('T')[0],
+        note: 'Delivery Pmnt'
+      }];
+    }
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      } else {
+        setOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
       }
-      return updatedOrder;
-    }));
-    navigate('Invoice', orderId);
+      navigate('Invoice', orderId);
+    } catch (e) {
+      console.error('Failed to mark delivered', e);
+      alert('Failed to mark order as delivered.');
+    }
   };
 
-  const handleLocalMarkAsDue = (orderId: string) => {
+  const handleLocalMarkAsDue = async (orderId: string) => {
     if (window.confirm('Mark this order as Due? It will move to the Due Orders list.')) {
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Due' as const } : o));
+      const orderToUpdate = orders.find(o => o.id === orderId);
+      if (!orderToUpdate) return;
+      const updatedOrder = { ...orderToUpdate, status: 'Due' as const };
+      try {
+        if (context.saveOrder) {
+          await context.saveOrder(updatedOrder);
+        } else {
+          setOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+        }
+      } catch (e) {
+        console.error('Failed to mark due', e);
+        alert('Failed to mark order as due.');
+      }
     }
   };
 
