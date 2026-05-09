@@ -512,6 +512,71 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     setOrder(prev => ({ ...prev, payments: updatedPayments, advance: totalPaid }));
   };
 
+  const handleHoldSubmit = async () => {
+    if (!order.customerId) {
+      alert("Please select a customer before putting the order on hold.");
+      return;
+    }
+
+    if (!order.branchId && activeBranchId === 'all' && currentUser?.role === 'master_admin') {
+      alert('Select a branch before holding this order.');
+      return;
+    }
+
+    const finalTotalPaid = (order.payments || []).reduce((sum, p) => sum + p.amount, 0);
+
+    let finalOrder = {
+      ...order,
+      branchId: order.branchId || (activeBranchId === 'all' ? currentUser?.branchId || '' : activeBranchId),
+      items: order.items,
+      advance: finalTotalPaid,
+      status: 'Hold' as Order['status'],
+    };
+
+    if (!orderId) {
+      const branchCodePrefix = toOrderPrefix(currentBranch?.code, currentBranch?.isProductionHub);
+      const usedNumbers = new Set(
+        orders
+          .map(o => o.id)
+          .filter(id => id.startsWith(branchCodePrefix))
+          .map(id => {
+            const numPart = id.replace(branchCodePrefix, '');
+            return parseInt(numPart, 10);
+          })
+          .filter(num => !isNaN(num))
+      );
+      let nextNum = 1;
+      while (usedNumbers.has(nextNum)) {
+        nextNum++;
+      }
+      const formattedId = `${branchCodePrefix}${String(nextNum).padStart(4, '0')}`;
+      if (orders.some(o => o.id === formattedId)) {
+        alert('Error: Duplicate Order ID detected. Please try again.');
+        return;
+      }
+      finalOrder = { ...finalOrder, id: formattedId };
+      setSettings(prev => ({ ...prev, lastOrderNumber: Math.max(prev.lastOrderNumber || 0, nextNum) }));
+    }
+
+    try {
+      await saveOrder(finalOrder);
+      alert('Order successfully put on Hold!');
+      
+      if (orderId) {
+        navigate('Orders');
+      } else {
+        setOrder(initialOrderState);
+        setCustomerSearch('');
+        setNewPayment({ amount: '', date: new Date().toISOString().split('T')[0], method: 'Cash' });
+        isDirtyRef.current = false;
+        window.scrollTo(0, 0);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to hold order.');
+    }
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!order.customerId) {
@@ -994,10 +1059,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         <div className="flex justify-end space-x-4 pt-6 border-t items-center">
           <button
             type="button"
-            onClick={() => {
-              markDirty();
-              setOrder(prev => ({ ...prev, status: 'Hold' }));
-            }}
+            onClick={handleHoldSubmit}
             className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 ${order.status === 'Hold' ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-amber-500 text-amber-600 hover:bg-amber-50'}`}
           >
             Hold
