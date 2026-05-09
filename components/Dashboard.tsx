@@ -123,7 +123,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   }, [orders, customers, todayStr, materialSales]);
 
   const todaysNetCash = todaysPayments.reduce((sum, p) => sum + p.amount, 0);
-  const pendingOrdersCount = orders.filter(o => o.status === 'Pending' || o.status === 'In Progress').length;
+  const pendingOrdersCount = orders.filter(o => o.status === 'Pending' || o.status === 'Hold' || o.status === 'In Progress').length;
   const todaysPaymentBreakdown = useMemo(() => {
     return todaysPayments.reduce<Record<string, number>>((totals, payment) => {
       const method = normalizePaymentMethod(payment.method);
@@ -349,6 +349,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
 
       const todaysStatusCounts = {
         'Pending': todaysOrders.filter(o => o.status === 'Pending').length,
+        'Hold': todaysOrders.filter(o => o.status === 'Hold').length,
         'In Progress': todaysOrders.filter(o => o.status === 'In Progress').length,
         'Completed': todaysOrders.filter(o => o.status === 'Completed').length,
         'Packed': todaysOrders.filter(o => o.status === 'Packed').length,

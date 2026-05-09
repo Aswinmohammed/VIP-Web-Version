@@ -343,6 +343,7 @@ const Reports: React.FC<ReportsProps> = ({ navigate }) => {
 
       const statusStats: Record<string, { count: number; amount: number; pieces: number }> = {
         'Pending': { count: 0, amount: 0, pieces: 0 },
+        'Hold': { count: 0, amount: 0, pieces: 0 },
         'In Progress': { count: 0, amount: 0, pieces: 0 },
         'Completed': { count: 0, amount: 0, pieces: 0 },
         'Packed': { count: 0, amount: 0, pieces: 0 },
@@ -823,6 +824,7 @@ const Reports: React.FC<ReportsProps> = ({ navigate }) => {
   const orderSummaryData = useMemo(() => {
     const summary: Record<string, { total: number; totalAmount: number; ordersCount: number; types: Record<string, number> }> = {
       'Pending': { total: 0, totalAmount: 0, ordersCount: 0, types: {} },
+      'Hold': { total: 0, totalAmount: 0, ordersCount: 0, types: {} },
       'In Progress': { total: 0, totalAmount: 0, ordersCount: 0, types: {} },
       'Completed': { total: 0, totalAmount: 0, ordersCount: 0, types: {} },
       'Packed': { total: 0, totalAmount: 0, ordersCount: 0, types: {} },
@@ -1526,6 +1528,7 @@ const Reports: React.FC<ReportsProps> = ({ navigate }) => {
                   <div className="flex flex-col items-end">
                     <span className={`px-3 py-1 rounded-full text-sm font-black ${
                       status === 'Pending' ? 'bg-orange-100 text-orange-600' :
+                      status === 'Hold' ? 'bg-amber-100 text-amber-700' :
                       status === 'In Progress' ? 'bg-blue-100 text-blue-600' :
                       status === 'Completed' ? 'bg-emerald-100 text-emerald-600' :
                       status === 'Packed' ? 'bg-purple-100 text-purple-600' :

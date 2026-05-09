@@ -282,7 +282,7 @@ const Sidebar: React.FC<SidebarProps> = ({ navigate, currentPage, onLogout }) =>
                                 <select
                                     value={context.currentUser.role === 'master_admin' ? context.activeBranchId : context.currentUser.branchId || ''}
                                     onChange={(event) => context.currentUser?.role === 'master_admin' && context.setActiveBranchId(event.target.value)}
-                                    disabled={context.currentUser.role !== 'master_admin'}
+                                    disabled={context.currentUser.role !== 'master_admin' || context.isPageLoading}
                                     className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 disabled:bg-slate-100 disabled:text-slate-500"
                                 >
                                     {context.currentUser.role === 'master_admin' && <option value="all">All Branches</option>}
@@ -292,6 +292,12 @@ const Sidebar: React.FC<SidebarProps> = ({ navigate, currentPage, onLogout }) =>
                                         </option>
                                     ))}
                                 </select>
+                                {context.isPageLoading && (
+                                    <div className="flex items-center text-[11px] font-semibold text-primary-600">
+                                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                        {context.pageLoadingLabel}
+                                    </div>
+                                )}
                             </div>
                         )}
 

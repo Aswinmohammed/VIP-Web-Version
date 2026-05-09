@@ -46,6 +46,7 @@ class UserRole(str, enum.Enum):
 
 class OrderStatus(str, enum.Enum):
     PENDING = "Pending"
+    HOLD = "Hold"
     IN_PROGRESS = "In Progress"
     COMPLETED = "Completed"
     PACKED = "Packed"

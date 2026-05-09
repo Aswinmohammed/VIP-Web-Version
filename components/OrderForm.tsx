@@ -81,6 +81,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
   const availableStatusOptions: Array<{ value: Order['status']; label: string; disabled?: boolean }> = [
     { value: 'Pending', label: 'Pending' },
+    { value: 'Hold', label: 'Hold' },
     { value: 'Due', label: 'Due' },
     { value: 'Delivered', label: 'Delivered' },
   ];
@@ -137,34 +138,54 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   });
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const measurementSuggestionsRef = useRef<HTMLDivElement>(null);
+  const hydratedOrderIdRef = useRef<string | null>(null);
+  const isDirtyRef = useRef(false);
+
+  const markDirty = () => {
+    isDirtyRef.current = true;
+  };
+
   useEffect(() => {
-    if (orderId) {
-      const existingOrder = orders.find(o => o.id === orderId);
-      if (existingOrder) {
-        let currentPayments = existingOrder.payments || [];
-        if (currentPayments.length === 0 && (existingOrder.advance || 0) > 0) {
-          currentPayments = [{
-            id: createClientId('PAY'),
-            branchId: existingOrder.branchId,
-            collectorId: currentUser?.id || 'SYSTEM',
-            amount: existingOrder.advance || 0,
-            date: existingOrder.orderDate,
-            method: 'Cash',
-            note: 'Initial Advance (Migrated)'
-          }];
-        }
-
-        setOrder({
-          ...existingOrder,
-          discount: existingOrder.discount || 0,
-          advance: existingOrder.advance || 0,
-          payments: currentPayments
-        });
-
-        const cust = customers.find(c => c.id === existingOrder.customerId);
-        if (cust) setCustomerSearch(cust.name);
-      }
+    if (!orderId) {
+      hydratedOrderIdRef.current = null;
+      isDirtyRef.current = false;
+      return;
     }
+
+    const existingOrder = orders.find(o => o.id === orderId);
+    if (!existingOrder) {
+      return;
+    }
+
+    const shouldHydrate = hydratedOrderIdRef.current !== existingOrder.id || !isDirtyRef.current;
+    if (!shouldHydrate) {
+      return;
+    }
+
+    let currentPayments = existingOrder.payments || [];
+    if (currentPayments.length === 0 && (existingOrder.advance || 0) > 0) {
+      currentPayments = [{
+        id: createClientId('PAY'),
+        branchId: existingOrder.branchId,
+        collectorId: currentUser?.id || 'SYSTEM',
+        amount: existingOrder.advance || 0,
+        date: existingOrder.orderDate,
+        method: 'Cash',
+        note: 'Initial Advance (Migrated)'
+      }];
+    }
+
+    setOrder({
+      ...existingOrder,
+      discount: existingOrder.discount || 0,
+      advance: existingOrder.advance || 0,
+      payments: currentPayments
+    });
+    hydratedOrderIdRef.current = existingOrder.id;
+    isDirtyRef.current = false;
+
+    const cust = customers.find(c => c.id === existingOrder.customerId);
+    if (cust) setCustomerSearch(cust.name);
   }, [orderId, orders, customers, currentUser]);
 
   useEffect(() => {
@@ -196,6 +217,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     if (name === 'status' && !canManageProductionStatuses && blockedStatusValues.includes(value as Order['status'])) {
       return;
     }
+    markDirty();
     setOrder(prev => ({
       ...prev,
       [name]: type === 'number' ? parseFloat(value) || 0 : value
@@ -252,6 +274,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
       completionData: []
     }));
 
+    markDirty();
     setOrder(prev => ({
       ...prev,
       customerId: oldOrder.customerId,
@@ -267,6 +290,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const selectCustomer = (customer: Customer) => {
     const newCustomerId = customer.id;
+    markDirty();
     setOrder(prev => ({ ...prev, customerId: newCustomerId }));
     setCustomerSearch(customer.name);
     setShowCustomerDropdown(false);
@@ -290,6 +314,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         id: customer.id || createClientId('CUST'),
         branchId: order.branchId || (activeBranchId === 'all' ? currentUser?.branchId || '' : activeBranchId),
       });
+      markDirty();
       setOrder(prev => ({ ...prev, customerId: savedCustomer.id }));
       setCustomerSearch(savedCustomer.name);
       setIsCustomerModalOpen(false);
@@ -299,6 +324,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   };
 
   const setDressTypeDirectly = (itemIndex: number, type: string) => {
+    markDirty();
     const newItems = [...order.items];
     const item = newItems[itemIndex];
     const dressType = type as DressType;
@@ -334,6 +360,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const handleItemChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    markDirty();
     const newItems = [...order.items];
     const item = newItems[index];
 
@@ -349,6 +376,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const handleMeasurementChange = (itemIndex: number, measIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
+    markDirty();
     const newItems = [...order.items];
     newItems[itemIndex].measurements[measIndex] = { ...newItems[itemIndex].measurements[measIndex], [name]: value };
     setOrder(prev => ({ ...prev, items: newItems }));
@@ -391,6 +419,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         e.preventDefault();
         const suggestion = measurementInput.suggestions[measurementInput.selectedIndex];
         if (suggestion) {
+          markDirty();
           const newItems = [...order.items];
           newItems[itemIndex].measurements[measIndex].value = suggestion.value;
           setOrder(prev => ({ ...prev, items: newItems }));
@@ -409,6 +438,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   };
 
   const selectMeasurementSuggestion = (itemIndex: number, measIndex: number, suggestion: MeasurementSuggestion) => {
+    markDirty();
     const newItems = [...order.items];
     newItems[itemIndex].measurements[measIndex].value = suggestion.value;
     setOrder(prev => ({ ...prev, items: newItems }));
@@ -417,10 +447,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const addItem = () => {
     const newItem: OrderItem = { id: createClientId('ITEM'), dressType: '', inventoryItemId: '', clothCode: '', clothName: '', clothSize: 0, stitchFee: 0, quantity: 1, pricePerUnit: 0, measurements: [], note: '' };
+    markDirty();
     setOrder(prev => ({ ...prev, items: [...prev.items, newItem] }));
   };
 
   const removeItem = (index: number) => {
+    markDirty();
     setOrder(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
   };
 
@@ -428,12 +460,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     const newMeasurement: Measurement = { id: createClientId('MEAS'), name: '', value: '' };
     const newItems = [...order.items];
     newItems[itemIndex].measurements.push(newMeasurement);
+    markDirty();
     setOrder(prev => ({ ...prev, items: newItems }));
   };
 
   const removeMeasurement = (itemIndex: number, measIndex: number) => {
     const newItems = [...order.items];
     newItems[itemIndex].measurements = newItems[itemIndex].measurements.filter((_, i) => i !== measIndex);
+    markDirty();
     setOrder(prev => ({ ...prev, items: newItems }));
   };
 
@@ -466,6 +500,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     };
     const updatedPayments = [...(order.payments || []), payment];
     const totalPaid = updatedPayments.reduce((sum, p) => sum + p.amount, 0);
+    markDirty();
     setOrder(prev => ({ ...prev, payments: updatedPayments, advance: totalPaid }));
     setNewPayment({ amount: '', date: new Date().toISOString().split('T')[0], method: 'Cash' });
   };
@@ -473,6 +508,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const handleRemovePayment = (paymentId: string) => {
     const updatedPayments = (order.payments || []).filter(p => p.id !== paymentId);
     const totalPaid = updatedPayments.reduce((sum, p) => sum + p.amount, 0);
+    markDirty();
     setOrder(prev => ({ ...prev, payments: updatedPayments, advance: totalPaid }));
   };
 
@@ -553,7 +589,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         <button
           type="button"
           className="px-4 py-2 bg-red-600 text-white rounded font-bold shadow hover:bg-red-700 transition-colors"
-          onClick={() => setOrder(prev => ({ ...prev, emergency: !prev.emergency }))}
+          onClick={() => {
+            markDirty();
+            setOrder(prev => ({ ...prev, emergency: !prev.emergency }));
+          }}
         >
           {order.emergency ? 'Emergency Order Active' : 'Mark as Emergency'}
         </button>
@@ -955,14 +994,30 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         <div className="flex justify-end space-x-4 pt-6 border-t items-center">
           <button
             type="button"
-            onClick={() => setOrder(prev => ({ ...prev, status: 'Due' }))}
+            onClick={() => {
+              markDirty();
+              setOrder(prev => ({ ...prev, status: 'Hold' }));
+            }}
+            className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 ${order.status === 'Hold' ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-amber-500 text-amber-600 hover:bg-amber-50'}`}
+          >
+            Hold
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              markDirty();
+              setOrder(prev => ({ ...prev, status: 'Due' }));
+            }}
             className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 ${order.status === 'Due' ? 'bg-red-600 border-red-600 text-white' : 'bg-white border-red-600 text-red-600 hover:bg-red-50'}`}
           >
             Due
           </button>
           <button
             type="button"
-            onClick={() => setOrder(prev => ({ ...prev, status: 'Delivered' }))}
+            onClick={() => {
+              markDirty();
+              setOrder(prev => ({ ...prev, status: 'Delivered' }));
+            }}
             className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 ${order.status === 'Delivered' ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-green-600 text-green-600 hover:bg-green-50'}`}
           >
             Deliver

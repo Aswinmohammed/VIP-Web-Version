@@ -142,7 +142,7 @@ def test_add_payment_queues_confirmation_from_reloaded_order(monkeypatch) -> Non
     assert captured["payment"] is persisted_payment
     assert captured["customer"] is customer
     assert scheduled["logs"][0].id is not None
-    assert db.commits == 1
+    assert db.commits == 2
     assert db.refreshed == [payment]
 
 
@@ -183,7 +183,7 @@ def test_update_order_status_to_due_queues_due_sms(monkeypatch) -> None:
 
     assert result is current_order
     assert len(dispatched_logs) == 1
-    assert db.commits == 1
+    assert db.commits == 2
 
 
 def test_update_order_status_to_delivered_queues_delivered_sms(monkeypatch) -> None:
@@ -221,4 +221,4 @@ def test_update_order_status_to_delivered_queues_delivered_sms(monkeypatch) -> N
 
     assert result is current_order
     assert len(dispatched_logs) == 1
-    assert db.commits == 1
+    assert db.commits == 2

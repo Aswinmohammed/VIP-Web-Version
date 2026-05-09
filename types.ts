@@ -204,7 +204,7 @@ export interface Order {
   customerPhone?: string;
   orderDate: string;
   dueDate: string;
-  status: 'Pending' | 'In Progress' | 'Completed' | 'Due' | 'Delivered' | 'Packed';
+  status: 'Pending' | 'Hold' | 'In Progress' | 'Completed' | 'Due' | 'Delivered' | 'Packed';
   items: OrderItem[];
   discount: number;
   advance: number;

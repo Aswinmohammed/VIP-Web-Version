@@ -10,7 +10,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from backend.app.database import engine
-from backend.app.main import ensure_branch_access_columns, ensure_employee_salary_columns, settings
+from backend.app.main import ensure_branch_access_columns, ensure_employee_salary_columns, ensure_order_status_support, settings
 from backend.app.models import Base
 
 
@@ -34,7 +34,8 @@ def main() -> None:
 
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
-    print("Applied compatibility bootstrap for branch and employee schema updates.")
+    ensure_order_status_support()
+    print("Applied compatibility bootstrap for branch, employee, and order status schema updates.")
     print("Next step: create a master admin with bootstrap_master_admin.py if needed.")
 
 

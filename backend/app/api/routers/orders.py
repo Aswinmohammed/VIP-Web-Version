@@ -378,34 +378,48 @@ def list_production_notifications(
         if not current_branch.is_production_hub:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Production notifications are available only for production branches")
 
-    branches = list(db.scalars(select(Branch).where(Branch.tenant_id == actor.tenant_id)))
-    source_branches = [branch for branch in branches if not branch.is_production_hub]
-
-    notifications: list[dict] = []
-    for branch in source_branches:
-        pending_orders = list(
-            db.scalars(
-                select(Order)
-                .where(
-                    Order.tenant_id == actor.tenant_id,
-                    Order.branch_id == branch.id,
-                    Order.status == OrderStatus.PENDING,
-                )
-                .order_by(Order.created_at.desc())
-            )
+    latest_order_number = (
+        select(Order.order_number)
+        .where(
+            Order.tenant_id == actor.tenant_id,
+            Order.branch_id == Branch.id,
+            Order.status == OrderStatus.PENDING,
         )
-        if not pending_orders:
-            continue
-        notifications.append(
-            {
-                "branch_id": branch.id,
-                "branch_name": branch.name,
-                "latest_order_number": pending_orders[0].order_number,
-                "count": len(pending_orders),
-            }
-        )
+        .order_by(Order.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
 
-    return notifications
+    stmt = (
+        select(
+            Branch.id.label("branch_id"),
+            Branch.name.label("branch_name"),
+            latest_order_number.label("latest_order_number"),
+            func.count(Order.id).label("pending_count"),
+        )
+        .join(
+            Order,
+            Order.branch_id == Branch.id,
+        )
+        .where(
+            Branch.tenant_id == actor.tenant_id,
+            Branch.is_production_hub.is_(False),
+            Order.tenant_id == actor.tenant_id,
+            Order.status == OrderStatus.PENDING,
+        )
+        .group_by(Branch.id, Branch.name)
+        .order_by(Branch.name.asc())
+    )
+
+    return [
+        {
+            "branch_id": row.branch_id,
+            "branch_name": row.branch_name,
+            "latest_order_number": row.latest_order_number,
+            "count": row.pending_count,
+        }
+        for row in db.execute(stmt)
+    ]
 
 
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
@@ -528,6 +542,7 @@ def update_order(
         queued_logs.append(queue_due_reminder_sms(db, loaded_order, loaded_order.customer, reference_date=loaded_order.due_date or loaded_order.order_date))
     if previous_status != OrderStatus.DELIVERED and loaded_order.status == OrderStatus.DELIVERED and loaded_order.customer is not None:
         queued_logs.append(queue_order_delivered_sms(db, loaded_order, loaded_order.customer))
+    db.commit()
     _schedule_immediate_sms_dispatch(background_tasks, queued_logs)
     return _serialize_order(_get_order_or_404(db, actor, order.id))
 
@@ -559,6 +574,7 @@ def update_order_status(
         queued_logs.append(queue_due_reminder_sms(db, current_order, current_order.customer, reference_date=current_order.due_date or current_order.order_date))
     if previous_status != OrderStatus.DELIVERED and current_order.status == OrderStatus.DELIVERED and current_order.customer is not None:
         queued_logs.append(queue_order_delivered_sms(db, current_order, current_order.customer))
+    db.commit()
     _schedule_immediate_sms_dispatch(background_tasks, queued_logs)
     return _serialize_order(_get_order_or_404(db, actor, order_id))
 
@@ -591,6 +607,7 @@ def add_payment(
         persisted_payment = next((current_payment for current_payment in loaded_order.payments if current_payment.id == payment.id), payment)
         queued_logs.append(queue_payment_confirmation_sms(db, loaded_order, persisted_payment, loaded_order.customer))
         queued_logs.append(queue_thank_you_sms(db, loaded_order, loaded_order.customer))
+    db.commit()
     _schedule_immediate_sms_dispatch(background_tasks, queued_logs)
     db.refresh(payment)
     return payment

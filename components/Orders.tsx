@@ -22,6 +22,7 @@ const formatOrderId = (id: string) => {
 };
 
 const BRANCH_PIECE_LABEL = 'Branch Piece Count';
+const PRODUCTION_NOTIFICATION_REFRESH_MS = 20000;
 
 const CopyButton: React.FC<{ text: string }> = ({ text }: { text: string }) => {
   const [copied, setCopied] = useState(false);
@@ -273,6 +274,7 @@ const getStatusChip = (status: Order['status']) => {
     const baseClasses = "px-2 py-1 text-xs font-semibold rounded-full";
     switch (status) {
       case 'Pending': return `${baseClasses} bg-yellow-100 text-yellow-800`;
+      case 'Hold': return `${baseClasses} bg-amber-100 text-amber-800`;
       case 'In Progress': return `${baseClasses} bg-blue-100 text-blue-800`;
       case 'Completed': return `${baseClasses} bg-green-100 text-green-800`;
       case 'Packed': return `${baseClasses} bg-blue-100 text-blue-800`;
@@ -735,12 +737,35 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       return;
     }
 
-    void fetchProductionNotifications(accessToken)
-      .then(setBranchNotifications)
-      .catch((error) => {
+    let isCancelled = false;
+
+    const loadNotifications = async () => {
+      if (document.hidden) {
+        return;
+      }
+
+      try {
+        const notifications = await fetchProductionNotifications(accessToken);
+        if (!isCancelled) {
+          setBranchNotifications(notifications);
+        }
+      } catch (error) {
         console.error('Unable to load branch notifications:', error);
-        setBranchNotifications([]);
-      });
+        if (!isCancelled) {
+          setBranchNotifications([]);
+        }
+      }
+    };
+
+    void loadNotifications();
+    const intervalId = window.setInterval(() => {
+      void loadNotifications();
+    }, PRODUCTION_NOTIFICATION_REFRESH_MS);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [accessToken, currentBranch]);
 
   const handleToggleCut = (itemId: string) => {
@@ -919,6 +944,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const statusOptions = [
     { label: 'All Status', value: 'All' },
     { label: 'Pending', value: 'Pending' },
+    { label: 'Hold', value: 'Hold' },
     ...(canFilterProductionStatuses ? [
       { label: 'In Progress', value: 'In Progress' },
       { label: 'Completed', value: 'Completed' },

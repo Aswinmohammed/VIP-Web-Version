@@ -217,6 +217,58 @@ type PendingCollectionSync<T> = {
   timeoutId: number | null;
 };
 
+type CloudDataset = 'customers' | 'orders' | 'inventory' | 'expenses' | 'materialSales' | 'employees' | 'suppliers';
+
+type DatasetCacheEntry = {
+  customers: Customer[];
+  orders: Order[];
+  inventory: InventoryItem[];
+  expenses: Expense[];
+  materialSales: MaterialSale[];
+  employees: Employee[];
+  suppliers: Supplier[];
+};
+
+type CloudScope = {
+  resolvedBranchId: string;
+  branchFilter?: string;
+  orderDataBranchFilter?: string;
+  customerDataBranchFilter?: string;
+  hasProductionAccess: boolean;
+};
+
+const ALL_DATASETS: CloudDataset[] = ['customers', 'orders', 'inventory', 'expenses', 'materialSales', 'employees', 'suppliers'];
+
+const PAGE_DATASETS: Record<Page, CloudDataset[]> = {
+  Dashboard: ['customers', 'orders', 'inventory', 'expenses', 'materialSales', 'employees'],
+  Customers: ['customers'],
+  Orders: ['customers', 'orders', 'employees'],
+  'Due Orders': ['customers', 'orders'],
+  'Add Order': ['customers', 'orders'],
+  'Edit Order': ['customers', 'orders'],
+  Invoice: ['customers', 'orders'],
+  Inventory: ['inventory'],
+  Reports: ['customers', 'orders', 'inventory', 'expenses', 'materialSales', 'employees'],
+  Expenses: ['expenses'],
+  'Material Sales': ['customers', 'inventory', 'materialSales'],
+  Employees: ['employees', 'orders'],
+  Suppliers: ['suppliers'],
+  SMS: [],
+  Users: [],
+};
+
+function createEmptyDatasetCache(): Record<CloudDataset, Map<string, unknown[]>> {
+  return {
+    customers: new Map<string, Customer[]>(),
+    orders: new Map<string, Order[]>(),
+    inventory: new Map<string, InventoryItem[]>(),
+    expenses: new Map<string, Expense[]>(),
+    materialSales: new Map<string, MaterialSale[]>(),
+    employees: new Map<string, Employee[]>(),
+    suppliers: new Map<string, Supplier[]>(),
+  };
+}
+
 const App: React.FC = () => {
   const [page, setPage] = useState<Page>('Dashboard');
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -239,14 +291,27 @@ const App: React.FC = () => {
   const [isBooting, setIsBooting] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isInitialCloudLoadComplete, setIsInitialCloudLoadComplete] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const [pageLoadingLabel, setPageLoadingLabel] = useState('Loading data...');
 
   const accessTokenRef = useRef<string | null>(null);
   const activeBranchIdRef = useRef<string>('all');
   const currentUserRef = useRef<CurrentUser | null>(null);
   const currentBranchRef = useRef<Branch | null>(null);
+  const customersRef = useRef<Customer[]>([]);
+  const ordersRef = useRef<Order[]>([]);
+  const inventoryRef = useRef<InventoryItem[]>([]);
+  const expensesRef = useRef<Expense[]>([]);
+  const materialSalesRef = useRef<MaterialSale[]>([]);
+  const suppliersRef = useRef<Supplier[]>([]);
   const employeesRef = useRef<Employee[]>([]);
   const isDataLoadingRef = useRef<boolean>(false);
+  const branchesLoadedRef = useRef(false);
+  const isInitialCloudLoadCompleteRef = useRef(false);
   const lastCloudRefreshAtRef = useRef<number>(0);
+  const datasetCacheRef = useRef<Record<CloudDataset, Map<string, unknown[]>>>(createEmptyDatasetCache());
+  const activeDatasetCacheKeysRef = useRef<Partial<Record<CloudDataset, string>>>({});
   const customerSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
   const orderSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
   const inventorySyncQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -273,8 +338,32 @@ const App: React.FC = () => {
   }, [accessToken, activeBranchId, currentUser]);
 
   useEffect(() => {
+    customersRef.current = customers;
+  }, [customers]);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  useEffect(() => {
+    expensesRef.current = expenses;
+  }, [expenses]);
+
+  useEffect(() => {
+    materialSalesRef.current = materialSales;
+  }, [materialSales]);
+
+  useEffect(() => {
     employeesRef.current = employees;
   }, [employees]);
+
+  useEffect(() => {
+    suppliersRef.current = suppliers;
+  }, [suppliers]);
 
   useEffect(() => {
     try {
@@ -346,6 +435,9 @@ const App: React.FC = () => {
   const clearSession = useCallback(() => {
     setAccessToken(null);
     setCurrentUser(null);
+    setIsInitialCloudLoadComplete(false);
+    setIsPageLoading(false);
+    setPageLoadingLabel('Loading data...');
     clearPendingCollectionSync(customerPendingSyncRef);
     clearPendingCollectionSync(orderPendingSyncRef);
     clearPendingCollectionSync(inventoryPendingSyncRef);
@@ -356,6 +448,10 @@ const App: React.FC = () => {
     employeeCreateInFlightRef.current.clear();
     employeeIdAliasesRef.current.clear();
     deletedEmployeeIdsRef.current.clear();
+    datasetCacheRef.current = createEmptyDatasetCache();
+    activeDatasetCacheKeysRef.current = {};
+    branchesLoadedRef.current = false;
+    isInitialCloudLoadCompleteRef.current = false;
     lastCloudRefreshAtRef.current = 0;
     setBranches([]);
     setActiveBranchId('all');
@@ -384,6 +480,244 @@ const App: React.FC = () => {
     }
     return '';
   }, []);
+
+  const getDatasetsForPage = useCallback((targetPage: Page) => PAGE_DATASETS[targetPage] || [], []);
+
+  const getPageLoadingText = useCallback((targetPage: Page) => {
+    switch (targetPage) {
+      case 'Orders':
+      case 'Due Orders':
+      case 'Add Order':
+      case 'Edit Order':
+      case 'Invoice':
+        return 'Loading orders...';
+      case 'Customers':
+        return 'Loading customers...';
+      case 'Inventory':
+        return 'Loading inventory...';
+      case 'Reports':
+        return 'Loading reports...';
+      case 'Expenses':
+        return 'Loading expenses...';
+      case 'Material Sales':
+        return 'Loading material sales...';
+      case 'Employees':
+        return 'Loading employees...';
+      case 'Suppliers':
+        return 'Loading suppliers...';
+      default:
+        return 'Loading dashboard...';
+    }
+  }, []);
+
+  const getCollectionState = useCallback((dataset: CloudDataset): DatasetCacheEntry[CloudDataset] => {
+    switch (dataset) {
+      case 'customers':
+        return customersRef.current;
+      case 'orders':
+        return ordersRef.current;
+      case 'inventory':
+        return inventoryRef.current;
+      case 'expenses':
+        return expensesRef.current;
+      case 'materialSales':
+        return materialSalesRef.current;
+      case 'employees':
+        return employeesRef.current;
+      case 'suppliers':
+        return suppliersRef.current;
+      default:
+        return [];
+    }
+  }, []);
+
+  const applyDatasetState = useCallback((dataset: CloudDataset, data: DatasetCacheEntry[CloudDataset]) => {
+    switch (dataset) {
+      case 'customers':
+        setCustomersState(data as Customer[]);
+        break;
+      case 'orders':
+        setOrdersState(data as Order[]);
+        break;
+      case 'inventory':
+        setInventoryState(data as InventoryItem[]);
+        break;
+      case 'expenses':
+        setExpensesState(data as Expense[]);
+        break;
+      case 'materialSales':
+        setMaterialSalesState(data as MaterialSale[]);
+        break;
+      case 'employees':
+        setEmployeesState(data as Employee[]);
+        break;
+      case 'suppliers':
+        setSuppliersState(data as Supplier[]);
+        break;
+      default:
+        break;
+    }
+  }, []);
+
+  const getScopeCacheKey = useCallback((dataset: CloudDataset, scope: CloudScope) => {
+    const filterValue = dataset === 'customers'
+      ? scope.customerDataBranchFilter
+      : dataset === 'orders'
+        ? scope.orderDataBranchFilter
+        : scope.branchFilter;
+    return filterValue || 'all';
+  }, []);
+
+  const writeDatasetCache = useCallback((dataset: CloudDataset, cacheKey: string, data: DatasetCacheEntry[CloudDataset]) => {
+    datasetCacheRef.current[dataset].set(cacheKey, [...data] as unknown[]);
+  }, []);
+
+  const readDatasetCache = useCallback((dataset: CloudDataset, cacheKey: string): DatasetCacheEntry[CloudDataset] | null => {
+    const cached = datasetCacheRef.current[dataset].get(cacheKey);
+    return cached ? ([...cached] as DatasetCacheEntry[CloudDataset]) : null;
+  }, []);
+
+  const resolveBranchScope = useCallback((loadedBranches: Branch[]): CloudScope => {
+    const actor = currentUserRef.current;
+    if (!actor) {
+      return {
+        resolvedBranchId: 'all',
+        branchFilter: undefined,
+        customerDataBranchFilter: undefined,
+        orderDataBranchFilter: undefined,
+        hasProductionAccess: false,
+      };
+    }
+
+    let resolvedBranchId =
+      actor.role === 'branch_admin'
+        ? actor.branchId || loadedBranches[0]?.id || ''
+        : activeBranchIdRef.current || 'all';
+
+    if (actor.role === 'master_admin' && resolvedBranchId !== 'all' && !loadedBranches.some((branch) => branch.id === resolvedBranchId)) {
+      resolvedBranchId = 'all';
+    }
+
+    const selectedBranch = resolvedBranchId !== 'all'
+      ? loadedBranches.find((branch) => branch.id === resolvedBranchId) || null
+      : null;
+    const hasProductionAccess = Boolean(selectedBranch?.isProductionHub);
+    const branchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
+    const orderDataBranchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all'
+      ? undefined
+      : hasProductionAccess
+        ? undefined
+        : resolvedBranchId;
+    const customerDataBranchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all'
+      ? undefined
+      : hasProductionAccess
+        ? undefined
+        : resolvedBranchId;
+
+    return {
+      resolvedBranchId,
+      branchFilter,
+      orderDataBranchFilter,
+      customerDataBranchFilter,
+      hasProductionAccess,
+    };
+  }, []);
+
+  const fetchDataset = useCallback(async (dataset: CloudDataset, token: string, scope: CloudScope) => {
+    switch (dataset) {
+      case 'customers':
+        return fetchCloudCustomers(token, scope.customerDataBranchFilter);
+      case 'orders':
+        return fetchCloudOrders(token, scope.orderDataBranchFilter);
+      case 'inventory':
+        return fetchCloudInventory(token, scope.branchFilter);
+      case 'expenses':
+        return fetchCloudExpenses(token, scope.branchFilter);
+      case 'materialSales':
+        return fetchCloudMaterialSales(token, scope.branchFilter);
+      case 'employees':
+        return fetchCloudEmployees(token, scope.branchFilter);
+      case 'suppliers':
+        return fetchCloudSuppliers(token, scope.branchFilter);
+      default:
+        return [];
+    }
+  }, []);
+
+  const ensureBranchesLoaded = useCallback(async () => {
+    if (!accessTokenRef.current) {
+      return branches;
+    }
+    if (branchesLoadedRef.current && branches.length > 0) {
+      return branches;
+    }
+
+    const loadedBranches = await fetchCloudBranches(accessTokenRef.current);
+    branchesLoadedRef.current = true;
+    setBranches(loadedBranches);
+    return loadedBranches;
+  }, [branches]);
+
+  const loadPageDatasets = useCallback(async (
+    targetPage: Page,
+    scope: CloudScope,
+    options?: { silent?: boolean; force?: boolean },
+  ) => {
+    const token = accessTokenRef.current;
+    if (!token) {
+      return;
+    }
+
+    const datasets = getDatasetsForPage(targetPage);
+    if (datasets.length === 0) {
+      return;
+    }
+
+    const isSilent = options?.silent ?? false;
+    const force = options?.force ?? false;
+
+    let hasAppliedCachedData = false;
+    for (const dataset of datasets) {
+      const cacheKey = getScopeCacheKey(dataset, scope);
+      activeDatasetCacheKeysRef.current[dataset] = cacheKey;
+      const cached = readDatasetCache(dataset, cacheKey);
+      if (cached) {
+        applyDatasetState(dataset, cached);
+        hasAppliedCachedData = true;
+      }
+    }
+
+    const shouldShowPageLoader = !isSilent && (!hasAppliedCachedData || !isInitialCloudLoadCompleteRef.current);
+    if (shouldShowPageLoader) {
+      setPageLoadingLabel(getPageLoadingText(targetPage));
+      setIsPageLoading(true);
+    }
+
+    try {
+      const loadedEntries = await Promise.all(
+        datasets.map(async (dataset) => {
+          const cacheKey = getScopeCacheKey(dataset, scope);
+          const data = await fetchDataset(dataset, token, scope);
+          return { dataset, cacheKey, data };
+        }),
+      );
+
+      loadedEntries.forEach(({ dataset, cacheKey, data }) => {
+        writeDatasetCache(dataset, cacheKey, data as DatasetCacheEntry[CloudDataset]);
+        applyDatasetState(dataset, data as DatasetCacheEntry[CloudDataset]);
+      });
+      lastCloudRefreshAtRef.current = Date.now();
+    } finally {
+      if (shouldShowPageLoader) {
+        setIsPageLoading(false);
+      }
+    }
+
+    if (!isInitialCloudLoadCompleteRef.current) {
+      isInitialCloudLoadCompleteRef.current = true;
+      setIsInitialCloudLoadComplete(true);
+    }
+  }, [applyDatasetState, fetchDataset, getDatasetsForPage, getPageLoadingText, getScopeCacheKey, readDatasetCache, writeDatasetCache]);
 
   const saveCustomer = useCallback(async (customer: Customer) => {
     const token = accessTokenRef.current;
@@ -1181,6 +1515,31 @@ const App: React.FC = () => {
     });
   }, [scheduleCollectionSync, syncSuppliersFromState]);
 
+  useEffect(() => {
+    const cacheKeys = activeDatasetCacheKeysRef.current;
+    if (cacheKeys.customers) {
+      writeDatasetCache('customers', cacheKeys.customers, customers);
+    }
+    if (cacheKeys.orders) {
+      writeDatasetCache('orders', cacheKeys.orders, orders);
+    }
+    if (cacheKeys.inventory) {
+      writeDatasetCache('inventory', cacheKeys.inventory, inventory);
+    }
+    if (cacheKeys.expenses) {
+      writeDatasetCache('expenses', cacheKeys.expenses, expenses);
+    }
+    if (cacheKeys.materialSales) {
+      writeDatasetCache('materialSales', cacheKeys.materialSales, materialSales);
+    }
+    if (cacheKeys.employees) {
+      writeDatasetCache('employees', cacheKeys.employees, employees);
+    }
+    if (cacheKeys.suppliers) {
+      writeDatasetCache('suppliers', cacheKeys.suppliers, suppliers);
+    }
+  }, [customers, orders, inventory, expenses, materialSales, employees, suppliers, writeDatasetCache]);
+
   const navigateTo = (newPage: Page, orderId?: string) => {
     if (newPage === 'Edit Order' && orderId) setEditingOrderId(orderId);
     else setEditingOrderId(null);
@@ -1263,63 +1622,19 @@ const App: React.FC = () => {
       return;
     }
 
-    isDataLoadingRef.current = true;
-    if (!isSilent) {
-      setIsDataLoading(true);
-    }
     try {
-      const loadedBranches = await fetchCloudBranches(accessTokenRef.current);
-      setBranches(loadedBranches);
+      const loadedBranches = await ensureBranchesLoaded();
+      const resolvedScope = resolveBranchScope(loadedBranches);
 
-      let resolvedBranchId =
-        currentUserRef.current.role === 'branch_admin'
-          ? currentUserRef.current.branchId || loadedBranches[0]?.id || ''
-          : activeBranchIdRef.current || 'all';
-
-      if (currentUserRef.current.role === 'master_admin' && resolvedBranchId !== 'all' && !loadedBranches.some((branch) => branch.id === resolvedBranchId)) {
-        resolvedBranchId = 'all';
-      }
-
-      if (resolvedBranchId !== activeBranchIdRef.current) {
-        setActiveBranchId(resolvedBranchId);
+      if (resolvedScope.resolvedBranchId !== activeBranchIdRef.current) {
+        setActiveBranchId(resolvedScope.resolvedBranchId);
         return;
       }
-
-      const branchFilter =
-        currentUserRef.current.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
-      const selectedBranch = resolvedBranchId !== 'all'
-        ? loadedBranches.find((branch) => branch.id === resolvedBranchId) || null
-        : null;
-      const hasProductionAccess = Boolean(selectedBranch?.isProductionHub);
-      const orderDataBranchFilter = currentUserRef.current.role === 'master_admin' && resolvedBranchId === 'all'
-        ? undefined
-        : hasProductionAccess
-          ? undefined
-          : resolvedBranchId;
-      const customerDataBranchFilter = currentUserRef.current.role === 'master_admin' && resolvedBranchId === 'all'
-        ? undefined
-        : hasProductionAccess
-          ? undefined
-          : resolvedBranchId;
-
-      const [loadedCustomers, loadedOrders, loadedInventory, loadedExpenses, loadedMaterialSales, loadedEmployees, loadedSuppliers] = await Promise.all([
-        fetchCloudCustomers(accessTokenRef.current, customerDataBranchFilter),
-        fetchCloudOrders(accessTokenRef.current, orderDataBranchFilter),
-        fetchCloudInventory(accessTokenRef.current, branchFilter),
-        fetchCloudExpenses(accessTokenRef.current, branchFilter),
-        fetchCloudMaterialSales(accessTokenRef.current, branchFilter),
-        fetchCloudEmployees(accessTokenRef.current, branchFilter),
-        fetchCloudSuppliers(accessTokenRef.current, branchFilter),
-      ]);
-
-      setCustomersState(loadedCustomers);
-      setOrdersState(loadedOrders);
-      setInventoryState(loadedInventory);
-      setExpensesState(loadedExpenses);
-      setMaterialSalesState(loadedMaterialSales);
-      setEmployeesState(loadedEmployees);
-      setSuppliersState(loadedSuppliers);
-      lastCloudRefreshAtRef.current = Date.now();
+      isDataLoadingRef.current = true;
+      if (!isSilent) {
+        setIsDataLoading(true);
+      }
+      await loadPageDatasets(page, resolvedScope, { silent: isSilent });
     } catch (error) {
       console.error('Cloud bootstrap failed:', error);
       window.alert(getErrorMessage(error));
@@ -1330,7 +1645,7 @@ const App: React.FC = () => {
         setIsDataLoading(false);
       }
     }
-  }, [clearSession, hasPendingLocalSync]);
+  }, [clearSession, ensureBranchesLoaded, hasPendingLocalSync, loadPageDatasets, page, resolveBranchScope]);
 
   useEffect(() => {
     refreshCloudDataRef.current = refreshCloudData;
@@ -1344,7 +1659,7 @@ const App: React.FC = () => {
     if (!isBooting && accessToken && currentUser) {
       void refreshCloudData();
     }
-  }, [isBooting, accessToken, currentUser, activeBranchId, refreshCloudData]);
+  }, [isBooting, accessToken, currentUser, activeBranchId, page, refreshCloudData]);
 
   useEffect(() => {
     if (!accessToken || !currentUser) {
@@ -1388,6 +1703,12 @@ const App: React.FC = () => {
     try {
       const session = await loginToCloud(payload);
       const nextBranchId = session.currentUser.role === 'branch_admin' ? session.currentUser.branchId || '' : 'all';
+      datasetCacheRef.current = createEmptyDatasetCache();
+      activeDatasetCacheKeysRef.current = {};
+      branchesLoadedRef.current = false;
+      isInitialCloudLoadCompleteRef.current = false;
+      setIsInitialCloudLoadComplete(false);
+      setIsPageLoading(false);
       setAccessToken(session.accessToken);
       setCurrentUser(session.currentUser);
       setActiveBranchId(nextBranchId);
@@ -1434,7 +1755,7 @@ const App: React.FC = () => {
     return order ? getCloudInvoiceUrl(order, accessToken) : null;
   }, [orders, accessToken]);
 
-  if (isBooting || (accessToken && currentUser && isDataLoading)) {
+  if (isBooting || (accessToken && currentUser && !isInitialCloudLoadComplete)) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#020617]">
         <div className="text-center">
@@ -1475,6 +1796,8 @@ const App: React.FC = () => {
       saveEmployeeSalaryPayment,
       deleteEmployeeSalaryPayment,
       refreshCloudData,
+      isPageLoading,
+      pageLoadingLabel,
       getInvoiceUrl,
       customers, setCustomers,
       orders, setOrders,
@@ -1488,7 +1811,15 @@ const App: React.FC = () => {
       <div className="flex flex-col h-screen bg-gray-100">
         <div className="flex flex-1 overflow-hidden">
           <Sidebar navigate={navigateTo} currentPage={page} onLogout={handleLogout} />
-          <main className="flex-1 p-6 sm:p-8 overflow-y-auto">{renderPage()}</main>
+          <main className="relative flex-1 p-6 sm:p-8 overflow-y-auto">
+            {isPageLoading && (
+              <div className="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary-600" />
+                {pageLoadingLabel}
+              </div>
+            )}
+            {renderPage()}
+          </main>
         </div>
       </div>
     </AppContext.Provider>

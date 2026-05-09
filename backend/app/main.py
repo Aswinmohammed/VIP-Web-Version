@@ -78,6 +78,14 @@ def ensure_employee_salary_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_order_status_support() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold'"))
+
+
 def ensure_sms_support_columns() -> None:
     inspector = inspect(engine)
     if _table_exists(inspector, "customers"):
@@ -154,6 +162,7 @@ async def lifespan(_: FastAPI):
         Base.metadata.create_all(bind=engine)
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
+    ensure_order_status_support()
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()
     yield
