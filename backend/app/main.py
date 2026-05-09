@@ -113,6 +113,23 @@ def ensure_sms_support_columns() -> None:
         ],
     )
 
+    from backend.app.services.sms import INTECH_GATEWAY_BASE_URL, INTECH_API_KEY_REFERENCE, INTECH_PROVIDER_NAME
+    with engine.begin() as connection:
+        connection.execute(
+            text("""
+                UPDATE sms_settings 
+                SET api_base_url = :url,
+                    api_key_ref = :ref,
+                    provider_name = :name,
+                    is_enabled = TRUE,
+                    transactional_enabled = TRUE,
+                    sender_id = 'VIP TAILORS'
+                WHERE (api_base_url IS NULL OR api_base_url = '') 
+                   OR (api_key_ref IS NULL OR api_key_ref = '')
+            """),
+            {"url": INTECH_GATEWAY_BASE_URL, "ref": INTECH_API_KEY_REFERENCE, "name": INTECH_PROVIDER_NAME}
+        )
+
 
 def ensure_inventory_and_order_material_columns() -> None:
     inspector = inspect(engine)

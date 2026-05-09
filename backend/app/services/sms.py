@@ -46,6 +46,10 @@ SMS_FOOTER_LINE = "Thank you - VIP Tailors & Fashion Pvt Ltd."
 BRANCH_CONTACT_FALLBACK = "Contact branch directly"
 OWNER_CONTACT_PHONE = "077 777 0811"
 OWNER_CONTACT_INDENT = "                             "
+INTECH_GATEWAY_BASE_URL = "https://sms.intechitsolutions.com/api/send"
+INTECH_API_KEY_REFERENCE = "env:VIP_SMS_API_KEY"
+INTECH_PROVIDER_NAME = "Intech SMS"
+
 
 def _contact_details_block() -> str:
     return f"For More Details: {{BranchPhone}}\n{OWNER_CONTACT_INDENT}{OWNER_CONTACT_PHONE}"
@@ -348,10 +352,19 @@ def get_or_create_sms_settings(db: Session, tenant_id) -> SmsSettings:
     if settings:
         return settings
 
-    settings = SmsSettings(tenant_id=tenant_id)
+    settings = SmsSettings(
+        tenant_id=tenant_id,
+        provider_name=INTECH_PROVIDER_NAME,
+        api_base_url=INTECH_GATEWAY_BASE_URL,
+        api_key_ref=INTECH_API_KEY_REFERENCE,
+        is_enabled=True,
+        transactional_enabled=True,
+        sender_id="VIP TAILORS"
+    )
     db.add(settings)
     db.flush()
     return settings
+
 
 
 def ensure_default_sms_templates(db: Session, tenant_id, actor_id=None) -> list[SmsTemplate]:
