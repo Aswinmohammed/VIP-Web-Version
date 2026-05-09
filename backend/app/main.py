@@ -86,11 +86,8 @@ def ensure_order_status_support() -> None:
     if engine.dialect.name != "postgresql":
         return
 
-    try:
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-            connection.execute(text("ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'Hold'"))
-    except Exception as e:
-        print(f"Warning: Failed to alter orderstatus: {e}")
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold'"))
 
 
 def ensure_sms_support_columns() -> None:
