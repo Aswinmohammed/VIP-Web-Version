@@ -9,12 +9,23 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, apply_branch_scope, ensure_branch_in_tenant, get_current_actor, resolve_branch_scope
-from backend.app.models import Customer, MeasurementSet, Order
+from backend.app.models import Branch, Customer, MeasurementSet, Order
 from backend.app.schemas import CustomerCreate, CustomerRead, MeasurementSetRead
 from backend.app.services.sms import normalize_phone_number
 
 
 router = APIRouter(prefix="/customers", tags=["customers"])
+
+
+def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
+    if actor.is_master_admin:
+        return True
+    if actor.branch_id is None:
+        return False
+    branch = db.scalar(select(Branch).where(Branch.id == actor.branch_id, Branch.tenant_id == actor.tenant_id))
+    if not branch:
+        return False
+    return bool(branch.is_production_hub)
 
 
 @router.get("", response_model=list[CustomerRead])
@@ -23,7 +34,13 @@ def list_customers(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[Customer]:
-    stmt = apply_branch_scope(select(Customer).order_by(Customer.name.asc()), Customer, actor, branch_id)
+    stmt = select(Customer).order_by(Customer.name.asc())
+    if _has_production_access(db, actor):
+        stmt = stmt.where(Customer.tenant_id == actor.tenant_id)
+        if branch_id is not None:
+            stmt = stmt.where(Customer.branch_id == branch_id)
+    else:
+        stmt = apply_branch_scope(stmt, Customer, actor, branch_id)
     return list(db.scalars(stmt))
 
 

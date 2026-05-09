@@ -88,9 +88,9 @@ def ensure_order_status_support() -> None:
 
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-            connection.execute(text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold'"))
+            connection.execute(text("ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'Hold'"))
     except Exception as e:
-        print(f"Warning: Failed to alter order_status: {e}")
+        print(f"Warning: Failed to alter orderstatus: {e}")
 
 
 def ensure_sms_support_columns() -> None:
