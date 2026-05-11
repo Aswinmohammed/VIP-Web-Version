@@ -7,9 +7,16 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE order_status AS ENUM ('Pending', 'In Progress', 'Completed', 'Packed', 'Due', 'Delivered');
+    CREATE TYPE order_status AS ENUM ('Pending', 'Hold', 'In Progress', 'Completed', 'Packed', 'Due', 'Delivered');
 EXCEPTION
     WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Migration: Add 'Hold' to order_status enum if it doesn't already exist
+DO $$ BEGIN
+    ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';
+EXCEPTION
+    WHEN others THEN NULL;
 END $$;
 
 DO $$ BEGIN

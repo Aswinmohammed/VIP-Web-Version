@@ -937,13 +937,15 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       } else if (order.status !== statusFilter) return false;
       if (fromDate && order.orderDate < fromDate) return false;
       if (toDate && order.orderDate > toDate) return false;
-      const customer = customers.find(c => c.id === order.customerId);
-      const customerName = (customer?.name || 'Unknown').toLowerCase();
-      const customerPhone = (customer?.phone || '').toLowerCase();
+      // Use getCustomerName/getCustomerPhone which handles cross-branch order.customerName fallback
+      const customerName = getCustomerName(order).toLowerCase();
+      const customerPhone = getCustomerPhone(order).toLowerCase();
       const lowerSearchTerm = searchTerm.toLowerCase();
+      if (!lowerSearchTerm) return true;
       return customerName.includes(lowerSearchTerm) || 
              customerPhone.includes(lowerSearchTerm) || 
-             order.id.toLowerCase().includes(lowerSearchTerm);
+             order.id.toLowerCase().includes(lowerSearchTerm) ||
+             (order.id.toLowerCase().replace(/[-\s]/g, '').includes(lowerSearchTerm.replace(/[-\s]/g, '')));
     }).sort((a, b) => {
       // Extract numeric part of order id (e.g., ORD0001 -> 1)
       const getNum = (id: string) => {
@@ -952,7 +954,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       };
       return getNum(b.id) - getNum(a.id);
     });
-  }, [orders, searchTerm, statusFilter, customers, fromDate, toDate]);
+  }, [orders, searchTerm, statusFilter, customers, fromDate, toDate, getCustomerName, getCustomerPhone]);
 
   const showAddOrderButton = canAccessPage('Add Order');
   const canOpenCutSheet = canUseOrderAction('cut_sheet');
@@ -991,6 +993,35 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           </button>
         )}
       </div>
+
+      {/* ─── SEARCH & FILTER BAR – always at top so it is always reachable ─── */}
+      <AdminFilterBar
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Search by Order ID, Customer Name or Phone..."
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromDateChange={setFromDate}
+        onToDateChange={setToDate}
+        statusFilter={statusFilter}
+        onStatusFilterChange={(value) => {
+          setStatusFilter(value);
+          if (value === 'Due') {
+            navigate('Due Orders');
+          }
+        }}
+        statusOptions={statusOptions}
+        extraActions={canFilterProductionStatuses && (statusFilter === 'Completed' || statusFilter === 'Packed') ? (
+          <button
+            onClick={() => setCompletedModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-600 transition-colors hover:bg-blue-100"
+            title="Generate Call List"
+          >
+            <Package className="mr-2 h-4 w-4" />
+            Call List
+          </button>
+        ) : null}
+      />
 
       {branchNotifications.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -1076,34 +1107,6 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           </div>
         </div>
       )}
-
-      <AdminFilterBar
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchPlaceholder="Search Order ID, Customer Name or Phone..."
-        fromDate={fromDate}
-        toDate={toDate}
-        onFromDateChange={setFromDate}
-        onToDateChange={setToDate}
-        statusFilter={statusFilter}
-        onStatusFilterChange={(value) => {
-          setStatusFilter(value);
-          if (value === 'Due') {
-            navigate('Due Orders');
-          }
-        }}
-        statusOptions={statusOptions}
-        extraActions={canFilterProductionStatuses && (statusFilter === 'Completed' || statusFilter === 'Packed') ? (
-          <button
-            onClick={() => setCompletedModalOpen(true)}
-            className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-600 transition-colors hover:bg-blue-100"
-            title="Generate Call List"
-          >
-            <Package className="mr-2 h-4 w-4" />
-            Call List
-          </button>
-        ) : null}
-      />
 
       <div className="space-y-4 md:hidden">
         {filteredOrders.length > 0 ? filteredOrders.map((order) => (

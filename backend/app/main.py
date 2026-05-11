@@ -83,14 +83,41 @@ def ensure_employee_salary_columns() -> None:
 
 
 def ensure_order_status_support() -> None:
+    """Ensure the 'Hold' value exists in the order_status PostgreSQL enum.
+
+    This is an idempotent migration that runs every startup.
+    ALTER TYPE ... ADD VALUE must run outside a transaction in PostgreSQL.
+    """
     if engine.dialect.name != "postgresql":
         return
 
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-            connection.execute(text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold'"))
+            # Check current enum values
+            result = connection.execute(
+                text(
+                    """
+                    SELECT enumlabel FROM pg_enum
+                    JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+                    WHERE typname = 'order_status'
+                    ORDER BY enumsortorder
+                    """
+                )
+            ).fetchall()
+            current_values = [row[0] for row in result]
+            print(f"[startup] order_status enum values: {current_values}")
+
+            if "Hold" not in current_values:
+                print("[startup] Adding 'Hold' to order_status enum...")
+                connection.execute(
+                    text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress'")
+                )
+                print("[startup] ✅ 'Hold' added successfully to order_status enum.")
+            else:
+                print("[startup] ✅ 'Hold' already present in order_status enum.")
     except Exception as e:
-        print(f"Warning: Failed to alter order_status: {e}")
+        print(f"[startup] ⚠️  Warning: Failed to migrate order_status enum: {e}")
+
 
 
 def ensure_sms_support_columns() -> None:
