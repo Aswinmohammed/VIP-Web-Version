@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useContext, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, Page, OrderItem, Measurement } from '../types';
 import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquare, Download, Loader2, StickyNote, Filter, Phone, Package, PhoneCall, Copy, Check, BellRing } from 'lucide-react';
@@ -746,8 +746,9 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   if (!context) return <div>Loading...</div>;
   const { orders, setOrders, customers, currentUser, activeBranchId, accessToken, currentBranch, canAccessPage, canUseOrderAction, branches, isAllBranchesScope, getBranchName, employees, setEmployees } = context;
 
-  const getCustomerName = (order: Order) => order.customerName || customers.find(c => c.id === order.customerId)?.name || 'Unknown';
-  const getCustomerPhone = (order: Order) => order.customerPhone || customers.find(c => c.id === order.customerId)?.phone || '';
+  const customersById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
+  const getCustomerName = useCallback((order: Order) => order.customerName || customersById.get(order.customerId)?.name || 'Unknown', [customersById]);
+  const getCustomerPhone = useCallback((order: Order) => order.customerPhone || customersById.get(order.customerId)?.phone || '', [customersById]);
   const branchNameById = useMemo(() => new Map(branches.map((branch) => [branch.id, branch.name])), [branches]);
   const getOrderBranchName = (order: Order) => order.branchName || branchNameById.get(order.branchId || '') || getBranchName(order.branchId) || 'Unknown Branch';
 
@@ -788,21 +789,39 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     };
   }, [accessToken, currentBranch]);
 
-  const handleToggleCut = (itemId: string) => {
+  const handleToggleCut = async (itemId: string) => {
     if (!viewingMeasurementsOrder) return;
     const updatedOrder = {
       ...viewingMeasurementsOrder,
       items: viewingMeasurementsOrder.items.map(item => item.id === itemId ? { ...item, isCut: !item.isCut } : item)
     };
+    // Optimistic update
     setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
     setViewingMeasurementsOrder(updatedOrder);
+    // Persist to backend
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      }
+    } catch (e) {
+      console.error('Failed to persist cut toggle:', e);
+    }
   };
 
-  const handleUpdateStatus = (status: Order['status']) => {
+  const handleUpdateStatus = async (status: Order['status']) => {
     if (!viewingMeasurementsOrder) return;
     const updatedOrder = { ...viewingMeasurementsOrder, status };
+    // Optimistic update for immediate UI feedback
     setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
     setViewingMeasurementsOrder(updatedOrder);
+    // Persist to backend so server state stays in sync
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      }
+    } catch (e) {
+      console.error('Failed to persist status update:', e);
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -898,7 +917,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     }));
   };
 
-  const handleDressTrackingUpdate = (itemId: string, completedQuantity: number, status: 'pending' | 'partial' | 'completed', completionData: boolean[]) => {
+  const handleDressTrackingUpdate = async (itemId: string, completedQuantity: number, status: 'pending' | 'partial' | 'completed', completionData: boolean[]) => {
     if (!trackingOrder) return;
 
     const updatedOrder = {
@@ -918,46 +937,94 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       updatedOrder.status = 'In Progress';
     }
 
+    // Optimistic update
     setTrackingOrder(updatedOrder);
     setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    // Persist to backend
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      }
+    } catch (e) {
+      console.error('Failed to persist tracking update:', e);
+    }
   };
 
-  const handleSetPacked = (orderId: string, status: Order['status'], bagCount?: number) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, bagCount } : o));
+  const handleSetPacked = async (orderId: string, status: Order['status'], bagCount?: number) => {
+    const orderToUpdate = orders.find(o => o.id === orderId);
+    if (!orderToUpdate) return;
+    const updatedOrder = { ...orderToUpdate, status, bagCount };
+    // Optimistic update
+    setOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+    // Persist to backend
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      }
+    } catch (e) {
+      console.error('Failed to persist packed status:', e);
+    }
   };
 
 
 
   const filteredOrders = useMemo(() => {
+    const lowerSearchTerm = searchTerm.trim().toLowerCase();
+    // Pre-compute a digits-only version for numeric-only searches (e.g. "141" to find "ORD-0141")
+    const searchDigitsOnly = lowerSearchTerm.replace(/\D/g, '');
+    const searchNormalized = lowerSearchTerm.replace(/[-\s]/g, '');
+    const isDigitsOnlySearch = searchDigitsOnly.length > 0 && searchDigitsOnly === lowerSearchTerm;
+
     return orders.filter(order => {
-      // Status filter
+      // ── Status filter (strict match) ──
       if (statusFilter === 'Emergency') {
         if (!order.emergency) return false;
       } else if (statusFilter !== 'All') {
         if (order.status !== statusFilter) return false;
       }
 
-      // Date range filter
+      // ── Date range filter ──
       if (fromDate && order.orderDate < fromDate) return false;
       if (toDate && order.orderDate > toDate) return false;
 
-      // Search filter — applied independently of status filter
-      const lowerSearchTerm = searchTerm.trim().toLowerCase();
+      // ── Search filter ──
       if (!lowerSearchTerm) return true;
 
-      const customerName = getCustomerName(order).toLowerCase();
-      const customerPhone = getCustomerPhone(order).toLowerCase();
-      // Normalize both the order id and search term by removing dashes/spaces for flexible matching
+      // Order ID matching: normalize by stripping dashes/spaces
       const orderId = order.id.toLowerCase();
       const orderIdNormalized = orderId.replace(/[-\s]/g, '');
-      const searchNormalized = lowerSearchTerm.replace(/[-\s]/g, '');
+      if (orderId.includes(lowerSearchTerm) || orderIdNormalized.includes(searchNormalized)) {
+        return true;
+      }
 
-      return (
-        customerName.includes(lowerSearchTerm) ||
-        customerPhone.includes(lowerSearchTerm) ||
-        orderId.includes(lowerSearchTerm) ||
-        orderIdNormalized.includes(searchNormalized)
-      );
+      // For pure-numeric searches, also match against just the numeric portion of the order ID
+      // e.g., searching "141" matches "ORD-0141" by comparing digits "0141" contains "141"
+      if (isDigitsOnlySearch) {
+        const orderIdDigits = orderId.replace(/\D/g, '');
+        if (orderIdDigits.includes(searchDigitsOnly)) {
+          return true;
+        }
+      }
+
+      // Customer name matching
+      const customerName = getCustomerName(order).toLowerCase();
+      if (customerName.includes(lowerSearchTerm)) {
+        return true;
+      }
+
+      // Phone number matching: normalize both by stripping all non-digit characters
+      const customerPhone = getCustomerPhone(order);
+      const phoneDigits = customerPhone.replace(/\D/g, '');
+      const searchPhoneDigits = lowerSearchTerm.replace(/\D/g, '');
+      if (searchPhoneDigits.length > 0 && phoneDigits.includes(searchPhoneDigits)) {
+        return true;
+      }
+      // Also try raw string match for phone
+      if (customerPhone.toLowerCase().includes(lowerSearchTerm)) {
+        return true;
+      }
+
+      return false;
     }).sort((a, b) => {
       // Sort by numeric part of order id descending (newest first)
       const getNum = (id: string) => {
@@ -1299,11 +1366,19 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           }}
           onClose={() => setTrackingOrder(null)}
           onUpdate={handleDressTrackingUpdate}
-          onCompleteOrder={() => {
+          onCompleteOrder={async () => {
             if (trackingOrder) {
               const updatedOrder = { ...trackingOrder, status: 'Completed' as const };
               setTrackingOrder(updatedOrder);
               setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+              // Persist to backend
+              try {
+                if (context.saveOrder) {
+                  await context.saveOrder(updatedOrder);
+                }
+              } catch (e) {
+                console.error('Failed to persist completed status:', e);
+              }
             }
           }}
         />
