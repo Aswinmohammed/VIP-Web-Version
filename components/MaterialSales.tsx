@@ -316,9 +316,10 @@ const MaterialSales: React.FC = () => {
                                             {inventory.filter(item => {
                                                 const cat = item.category.toLowerCase();
                                                 const name = item.name.toLowerCase();
-                                                const isMaterialCat = ['shirt', 'trouser', 'school shirt', 'school trouser', 'thobe', 'jubbah', 'kurta', 'coat', 'waistcoat'].some(c => cat.includes(c));
+                                                // Include items if category is Material/Cloth OR if it's a specific dress type OR if name has material keywords
+                                                const isMaterialType = ['material', 'cloth', 'fabric', 'piece', 'shirt', 'trouser', 'school shirt', 'school trouser', 'thobe', 'jubbah', 'kurta', 'coat', 'waistcoat'].some(c => cat.includes(c));
                                                 const hasMaterialKeyword = name.includes('material') || name.includes('cloth') || name.includes('fabric') || name.includes('piece');
-                                                return isMaterialCat || hasMaterialKeyword;
+                                                return isMaterialType || hasMaterialKeyword;
                                             }).map(item => (
                                                 <option key={item.id} value={item.id}>
                                                     {item.name} ({item.quantity} available)
