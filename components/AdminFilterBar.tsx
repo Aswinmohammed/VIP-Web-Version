@@ -127,14 +127,16 @@ const AdminFilterBar: React.FC<AdminFilterBarProps> = ({
               </select>
             )}
 
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((current) => !current)}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-100"
-            >
-              <Filter className="mr-2 h-4 w-4" />
-              Filters
-            </button>
+            {(onFromDateChange || onToDateChange || categoryOptions || customerOptions) && (
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((current) => !current)}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-100"
+              >
+                <Filter className="mr-2 h-4 w-4" />
+                Filters
+              </button>
+            )}
 
             {canClear && (
               <button
@@ -151,58 +153,70 @@ const AdminFilterBar: React.FC<AdminFilterBarProps> = ({
           </div>
         </div>
 
-        <div className={`${showAdvanced ? 'grid' : 'hidden'} gap-3 border-t border-slate-100 pt-4 md:grid md:grid-cols-2 xl:grid-cols-4`}>
-          {(onFromDateChange || onToDateChange) && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:col-span-2">
-              {onFromDateChange && (
-                <input
-                  type="date"
-                  value={fromDate || ''}
-                  onChange={(event) => onFromDateChange(event.target.value)}
-                  className={selectBaseClass}
-                />
-              )}
-              {onToDateChange && (
-                <input
-                  type="date"
-                  value={toDate || ''}
-                  onChange={(event) => onToDateChange(event.target.value)}
-                  className={selectBaseClass}
-                />
-              )}
-            </div>
-          )}
+        {/* Status filter is always visible — never hidden behind the Filters toggle */}
+        {statusOptions && onStatusFilterChange && (
+          <div className="flex flex-wrap gap-3">
+            {statusOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onStatusFilterChange(option.value)}
+                className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
+                  (statusFilter || 'All') === option.value
+                    ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-          {statusOptions && onStatusFilterChange && (
-            <select value={statusFilter || 'All'} onChange={(event) => onStatusFilterChange(event.target.value)} className={selectBaseClass}>
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
+        {(onFromDateChange || onToDateChange || categoryOptions || customerOptions) && (
+          <div className={`${showAdvanced ? 'grid' : 'hidden'} gap-3 border-t border-slate-100 pt-4 md:grid md:grid-cols-2 xl:grid-cols-4`}>
+            {(onFromDateChange || onToDateChange) && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:col-span-2">
+                {onFromDateChange && (
+                  <input
+                    type="date"
+                    value={fromDate || ''}
+                    onChange={(event) => onFromDateChange(event.target.value)}
+                    className={selectBaseClass}
+                  />
+                )}
+                {onToDateChange && (
+                  <input
+                    type="date"
+                    value={toDate || ''}
+                    onChange={(event) => onToDateChange(event.target.value)}
+                    className={selectBaseClass}
+                  />
+                )}
+              </div>
+            )}
 
-          {categoryOptions && onCategoryFilterChange && (
-            <select value={categoryFilter || 'All'} onChange={(event) => onCategoryFilterChange(event.target.value)} className={selectBaseClass}>
-              {categoryOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
+            {categoryOptions && onCategoryFilterChange && (
+              <select value={categoryFilter || 'All'} onChange={(event) => onCategoryFilterChange(event.target.value)} className={selectBaseClass}>
+                {categoryOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
 
-          {customerOptions && onCustomerFilterChange && (
-            <select value={customerFilter || 'All'} onChange={(event) => onCustomerFilterChange(event.target.value)} className={selectBaseClass}>
-              {customerOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+            {customerOptions && onCustomerFilterChange && (
+              <select value={customerFilter || 'All'} onChange={(event) => onCustomerFilterChange(event.target.value)} className={selectBaseClass}>
+                {customerOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -930,31 +930,43 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
+      // Status filter
       if (statusFilter === 'Emergency') {
         if (!order.emergency) return false;
-      } else if (statusFilter === 'All') {
-        // Show all statuses
-      } else if (order.status !== statusFilter) return false;
+      } else if (statusFilter !== 'All') {
+        if (order.status !== statusFilter) return false;
+      }
+
+      // Date range filter
       if (fromDate && order.orderDate < fromDate) return false;
       if (toDate && order.orderDate > toDate) return false;
-      // Use getCustomerName/getCustomerPhone which handles cross-branch order.customerName fallback
+
+      // Search filter — applied independently of status filter
+      const lowerSearchTerm = searchTerm.trim().toLowerCase();
+      if (!lowerSearchTerm) return true;
+
       const customerName = getCustomerName(order).toLowerCase();
       const customerPhone = getCustomerPhone(order).toLowerCase();
-      const lowerSearchTerm = searchTerm.toLowerCase();
-      if (!lowerSearchTerm) return true;
-      return customerName.includes(lowerSearchTerm) || 
-             customerPhone.includes(lowerSearchTerm) || 
-             order.id.toLowerCase().includes(lowerSearchTerm) ||
-             (order.id.toLowerCase().replace(/[-\s]/g, '').includes(lowerSearchTerm.replace(/[-\s]/g, '')));
+      // Normalize both the order id and search term by removing dashes/spaces for flexible matching
+      const orderId = order.id.toLowerCase();
+      const orderIdNormalized = orderId.replace(/[-\s]/g, '');
+      const searchNormalized = lowerSearchTerm.replace(/[-\s]/g, '');
+
+      return (
+        customerName.includes(lowerSearchTerm) ||
+        customerPhone.includes(lowerSearchTerm) ||
+        orderId.includes(lowerSearchTerm) ||
+        orderIdNormalized.includes(searchNormalized)
+      );
     }).sort((a, b) => {
-      // Extract numeric part of order id (e.g., ORD0001 -> 1)
+      // Sort by numeric part of order id descending (newest first)
       const getNum = (id: string) => {
         const match = id.match(/\d+/);
         return match ? parseInt(match[0], 10) : 0;
       };
       return getNum(b.id) - getNum(a.id);
     });
-  }, [orders, searchTerm, statusFilter, customers, fromDate, toDate, getCustomerName, getCustomerPhone]);
+  }, [orders, searchTerm, statusFilter, fromDate, toDate, getCustomerName, getCustomerPhone]);
 
   const showAddOrderButton = canAccessPage('Add Order');
   const canOpenCutSheet = canUseOrderAction('cut_sheet');
