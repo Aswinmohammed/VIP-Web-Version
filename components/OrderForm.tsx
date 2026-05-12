@@ -572,7 +572,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         window.scrollTo(0, 0);
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to hold order.');
+      console.error('Hold order failed:', error);
+      const message = error instanceof Error ? error.message : 'Unable to hold order.';
+      // Surface the actual server error for debugging
+      if (message.includes('500') || message.toLowerCase().includes('internal server error')) {
+        alert(`Server Error: The "Hold" status may not be configured in the database. Please contact your administrator to run the Hold migration.\n\nTechnical details: ${message}`);
+      } else {
+        alert(message);
+      }
     }
   };
 

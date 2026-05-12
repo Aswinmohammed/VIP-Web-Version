@@ -91,32 +91,54 @@ def ensure_order_status_support() -> None:
     if engine.dialect.name != "postgresql":
         return
 
+    def _read_enum_values(connection):
+        result = connection.execute(
+            text(
+                """
+                SELECT enumlabel FROM pg_enum
+                JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+                WHERE typname = 'order_status'
+                ORDER BY enumsortorder
+                """
+            )
+        ).fetchall()
+        return [row[0] for row in result]
+
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-            # Check current enum values
-            result = connection.execute(
-                text(
-                    """
-                    SELECT enumlabel FROM pg_enum
-                    JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
-                    WHERE typname = 'order_status'
-                    ORDER BY enumsortorder
-                    """
-                )
-            ).fetchall()
-            current_values = [row[0] for row in result]
+            current_values = _read_enum_values(connection)
             print(f"[startup] order_status enum values: {current_values}")
+
+            if not current_values:
+                print("[startup] ⚠️  order_status enum type not found — will be created with tables.")
+                return
 
             if "Hold" not in current_values:
                 print("[startup] Adding 'Hold' to order_status enum...")
                 connection.execute(
-                    text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress'")
+                    text("ALTER TYPE order_status ADD VALUE 'Hold' BEFORE 'In Progress'")
                 )
-                print("[startup] ✅ 'Hold' added successfully to order_status enum.")
+                # Verify the addition was successful
+                updated_values = _read_enum_values(connection)
+                if "Hold" in updated_values:
+                    print(f"[startup] ✅ 'Hold' added successfully. Updated enum: {updated_values}")
+                else:
+                    print(f"[startup] ❌ CRITICAL: 'Hold' was NOT added despite no error! Enum: {updated_values}")
+                    raise RuntimeError(
+                        "Failed to add 'Hold' to order_status enum — "
+                        "please run the migration SQL manually: "
+                        "ALTER TYPE order_status ADD VALUE 'Hold' BEFORE 'In Progress';"
+                    )
             else:
                 print("[startup] ✅ 'Hold' already present in order_status enum.")
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f"[startup] ⚠️  Warning: Failed to migrate order_status enum: {e}")
+        print(f"[startup] ❌ CRITICAL: Failed to migrate order_status enum: {e}")
+        print("[startup]    The 'Hold' feature will NOT work until this is resolved.")
+        print("[startup]    Manual fix: connect to PostgreSQL and run:")
+        print("[startup]    ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';")
+        raise RuntimeError(f"order_status enum migration failed: {e}") from e
 
 
 
