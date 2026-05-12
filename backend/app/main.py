@@ -111,6 +111,7 @@ def ensure_order_status_support() -> None:
 
     This is an idempotent migration that runs every startup.
     ALTER TYPE ... ADD VALUE must run outside a transaction in PostgreSQL.
+    Non-fatal: logs errors but never crashes the app.
     """
     if engine.dialect.name != "postgresql":
         return
@@ -140,29 +141,21 @@ def ensure_order_status_support() -> None:
             if "Hold" not in current_values:
                 print("[startup] Adding 'Hold' to order_status enum...")
                 connection.execute(
-                    text("ALTER TYPE order_status ADD VALUE 'Hold' BEFORE 'In Progress'")
+                    text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress'")
                 )
-                # Verify the addition was successful
                 updated_values = _read_enum_values(connection)
                 if "Hold" in updated_values:
                     print(f"[startup] ✅ 'Hold' added successfully. Updated enum: {updated_values}")
                 else:
-                    print(f"[startup] ❌ CRITICAL: 'Hold' was NOT added despite no error! Enum: {updated_values}")
-                    raise RuntimeError(
-                        "Failed to add 'Hold' to order_status enum — "
-                        "please run the migration SQL manually: "
-                        "ALTER TYPE order_status ADD VALUE 'Hold' BEFORE 'In Progress';"
-                    )
+                    print(f"[startup] ⚠️  'Hold' was not added — may need manual migration.")
+                    print("[startup]    Run: ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';")
             else:
                 print("[startup] ✅ 'Hold' already present in order_status enum.")
-    except RuntimeError:
-        raise
     except Exception as e:
-        print(f"[startup] ❌ CRITICAL: Failed to migrate order_status enum: {e}")
-        print("[startup]    The 'Hold' feature will NOT work until this is resolved.")
-        print("[startup]    Manual fix: connect to PostgreSQL and run:")
-        print("[startup]    ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';")
-        raise RuntimeError(f"order_status enum migration failed: {e}") from e
+        # Non-fatal: log the error but allow the app to start normally.
+        # The Hold feature may not work, but login and all other features will.
+        print(f"[startup] ⚠️  order_status enum migration warning (non-fatal): {e}")
+        print("[startup]    Manual fix: ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';")
 
 
 
@@ -257,17 +250,15 @@ def normalize_order_status_data() -> None:
     """One-time data migration: fix any orders stored with uppercase enum NAMES
     (e.g. 'PENDING', 'IN_PROGRESS') instead of the correct mixed-case VALUES
     (e.g. 'Pending', 'In Progress').
-    This repairs data written by buggy deployments using enum .name instead of .value.
     Safe to run repeatedly — only updates rows that need it.
-
-    Strategy:
-    1. If the old uppercase label exists as an enum type value → UPDATE rows then
-       optionally rename the label.
-    2. If the old label does NOT exist as an enum type value but rows contain it
-       as raw text (possible after a partial migration) → cast column to text,
-       UPDATE, cast back.
+    Non-fatal: logs errors but never crashes the app.
     """
     if engine.dialect.name != "postgresql":
+        return
+
+    # Skip if orders table doesn't exist yet
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "orders"):
         return
 
     status_map = {
@@ -291,20 +282,24 @@ def normalize_order_status_data() -> None:
             db_enum_values = {row[0] for row in result}
             print(f"[startup] order_status enum labels: {sorted(db_enum_values)}")
 
+            if not db_enum_values:
+                print("[startup] order_status enum not found, skipping data normalization.")
+                return
+
             needs_column_cast = False
 
             for old_val, new_val in status_map.items():
                 if old_val in db_enum_values:
                     if new_val in db_enum_values:
-                        # Both labels exist — migrate row data, then drop old label
-                        # Cast through text to avoid enum constraint during UPDATE
-                        connection.execute(text(
-                            "ALTER TABLE orders ALTER COLUMN status TYPE text"
-                        ))
+                        # Both labels exist — cast to text, migrate row data, cast back
+                        if not needs_column_cast:
+                            connection.execute(text(
+                                "ALTER TABLE orders ALTER COLUMN status TYPE text"
+                            ))
+                            needs_column_cast = True
                         connection.execute(text(
                             f"UPDATE orders SET status = '{new_val}' WHERE status = '{old_val}'"
                         ))
-                        needs_column_cast = True
                         print(f"[startup] Migrated row data '{old_val}' → '{new_val}'")
                     else:
                         # Only old label exists — rename it in the enum type
@@ -314,40 +309,48 @@ def normalize_order_status_data() -> None:
                         print(f"[startup] Renamed enum label '{old_val}' → '{new_val}'")
 
             if needs_column_cast:
-                # Restore the column type back to the enum
                 connection.execute(text(
                     "ALTER TABLE orders ALTER COLUMN status TYPE order_status "
                     "USING status::order_status"
                 ))
                 print("[startup] Restored orders.status column type to order_status enum.")
-
-            # Also fix rows where the data is the old uppercase string but the
-            # enum type already has the correct mixed-case labels (partial migration).
-            # We do this by temporarily casting to text, updating, then casting back.
             else:
-                # Check if any rows have stale uppercase values that aren't valid enum labels
-                stale_check = connection.execute(text(
-                    "SELECT DISTINCT status::text FROM orders "
-                    "WHERE status::text = ANY(ARRAY['PENDING','IN_PROGRESS','COMPLETED',"
-                    "'PACKED','DUE','DELIVERED','HOLD'])"
-                )).fetchall()
-                stale_values = [row[0] for row in stale_check]
+                # Enum labels are already correct — check if any row data is stale uppercase
+                try:
+                    stale_check = connection.execute(text(
+                        "SELECT DISTINCT status::text FROM orders "
+                        "WHERE status::text = ANY(ARRAY['PENDING','IN_PROGRESS','COMPLETED',"
+                        "'PACKED','DUE','DELIVERED','HOLD'])"
+                    )).fetchall()
+                    stale_values = [row[0] for row in stale_check]
 
-                if stale_values:
-                    print(f"[startup] Found stale status values in rows: {stale_values} — fixing...")
-                    connection.execute(text(
-                        "ALTER TABLE orders ALTER COLUMN status TYPE text"
-                    ))
-                    for old_val, new_val in status_map.items():
+                    if stale_values:
+                        print(f"[startup] Found stale status values in rows: {stale_values} — fixing...")
                         connection.execute(text(
-                            f"UPDATE orders SET status = '{new_val}' WHERE status = '{old_val}'"
+                            "ALTER TABLE orders ALTER COLUMN status TYPE text"
                         ))
-                        print(f"[startup] Fixed row data '{old_val}' → '{new_val}'")
-                    connection.execute(text(
-                        "ALTER TABLE orders ALTER COLUMN status TYPE order_status "
-                        "USING status::order_status"
-                    ))
-                    print("[startup] Restored orders.status column type after row fix.")
+                        for old_val, new_val in status_map.items():
+                            connection.execute(text(
+                                f"UPDATE orders SET status = '{new_val}' WHERE status = '{old_val}'"
+                            ))
+                            print(f"[startup] Fixed row data '{old_val}' → '{new_val}'")
+                        connection.execute(text(
+                            "ALTER TABLE orders ALTER COLUMN status TYPE order_status "
+                            "USING status::order_status"
+                        ))
+                        print("[startup] Restored orders.status column type after row fix.")
+                except Exception as stale_err:
+                    # Stale check failed (e.g. column is already text from a previous partial run)
+                    # Try to restore the column type if it's stuck as text
+                    print(f"[startup] Stale check warning: {stale_err}")
+                    try:
+                        connection.execute(text(
+                            "ALTER TABLE orders ALTER COLUMN status TYPE order_status "
+                            "USING status::order_status"
+                        ))
+                        print("[startup] Restored orders.status column type (recovery).")
+                    except Exception:
+                        pass
 
             print("[startup] ✅ Order status data normalization complete.")
     except Exception as e:
