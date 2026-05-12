@@ -9,8 +9,32 @@ from sqlalchemy import inspect, text
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
 from backend.app.database import engine
-from backend.app.models import Base, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
+from backend.app.models import Base, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
 from backend.app.services.files import save_json_backup, save_pdf_export
+from sqlalchemy import event
+
+
+def _register_psycopg3_enum_dumper(dbapi_connection, connection_record):
+    """Register a custom psycopg3 Dumper for OrderStatus so it sends
+    enum .value ('Hold') instead of .name ('HOLD') to PostgreSQL."""
+    try:
+        from psycopg.adapt import Dumper
+        from psycopg.pq import Format
+
+        class OrderStatusDumper(Dumper):
+            format = Format.TEXT
+
+            def dump(self, value):
+                if hasattr(value, 'value'):
+                    return value.value.encode()
+                return str(value).encode()
+
+        dbapi_connection.adapters.register_dumper(OrderStatus, OrderStatusDumper)
+    except Exception as e:
+        print(f"[startup] Warning: Could not register OrderStatus psycopg3 dumper: {e}")
+
+
+event.listen(engine, "connect", _register_psycopg3_enum_dumper)
 
 
 settings = get_settings()
@@ -229,12 +253,60 @@ def ensure_inventory_and_order_material_columns() -> None:
             connection.execute(text(statement))
 
 
+def normalize_order_status_data() -> None:
+    """One-time data migration: fix any orders stored with uppercase enum NAMES
+    (e.g. 'PENDING') instead of the correct mixed-case VALUES (e.g. 'Pending').
+    This repairs data written by buggy deployments using enum .name instead of .value.
+    Safe to run repeatedly — only updates rows that need it.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    status_map = {
+        'PENDING':     'Pending',
+        'HOLD':        'Hold',
+        'IN_PROGRESS': 'In Progress',
+        'COMPLETED':   'Completed',
+        'PACKED':      'Packed',
+        'DUE':         'Due',
+        'DELIVERED':   'Delivered',
+    }
+
+    try:
+        with engine.begin() as connection:
+            # Check the enum type's actual values first
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'order_status'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+
+            for old_val, new_val in status_map.items():
+                if old_val in db_enum_values and new_val in db_enum_values:
+                    # Both exist - migrate data from old to new
+                    connection.execute(text(
+                        f"UPDATE orders SET status = '{new_val}' WHERE status = '{old_val}'"
+                    ))
+                    print(f"[startup] Normalized order status '{old_val}' → '{new_val}'")
+                elif old_val in db_enum_values and new_val not in db_enum_values:
+                    # Only old name exists - rename the enum label
+                    connection.execute(text(
+                        f"ALTER TYPE order_status RENAME VALUE '{old_val}' TO '{new_val}'"
+                    ))
+                    print(f"[startup] Renamed enum label '{old_val}' → '{new_val}'")
+            print("[startup] ✅ Order status data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Status normalization warning: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
         Base.metadata.create_all(bind=engine)
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
+    normalize_order_status_data()
     ensure_order_status_support()
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()

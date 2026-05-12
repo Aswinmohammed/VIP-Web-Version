@@ -7,7 +7,6 @@ from decimal import Decimal
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.types import TypeDecorator
 
 
 class Base(DeclarativeBase):
@@ -53,30 +52,6 @@ class OrderStatus(str, enum.Enum):
     PACKED = "Packed"
     DUE = "Due"
     DELIVERED = "Delivered"
-
-
-class OrderStatusType(TypeDecorator):
-    """Custom SQLAlchemy type that forces OrderStatus enum to use .value
-    when binding to PostgreSQL, preventing psycopg3 from using .name ('HOLD')
-    instead of .value ('Hold').
-    """
-    impl = Enum(*[e.value for e in OrderStatus], name="order_status")
-    cache_ok = True
-
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return value
-        if isinstance(value, OrderStatus):
-            return value.value  # Returns plain str 'Hold', not enum object
-        return str(value)
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return value
-        try:
-            return OrderStatus(value)
-        except ValueError:
-            return value
 
 
 class CompletionStatus(str, enum.Enum):
@@ -202,7 +177,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixi
     order_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[OrderStatus] = mapped_column(OrderStatusType(), nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name="order_status"), nullable=False)
     discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     advance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     emergency: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
