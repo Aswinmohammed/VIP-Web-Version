@@ -529,6 +529,116 @@ def normalize_material_sale_status_data() -> None:
         print(f"[startup] ⚠️  Material sale status normalization warning: {e}")
 
 
+def normalize_sms_enum_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    
+    # SMS Template Categories
+    if _table_exists(inspector, "sms_templates"):
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                cat_map = {'TRANSACTIONAL': 'transactional', 'MARKETING': 'marketing', 'FESTIVAL': 'festival'}
+                result = connection.execute(text(
+                    "SELECT enumlabel FROM pg_enum "
+                    "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                    "WHERE typname = 'sms_template_category'"
+                )).fetchall()
+                db_enum_values = {row[0] for row in result}
+                if db_enum_values:
+                    for old_val, new_val in cat_map.items():
+                        if old_val in db_enum_values:
+                            if new_val in db_enum_values:
+                                connection.execute(text("ALTER TABLE sms_templates ALTER COLUMN category TYPE text"))
+                                connection.execute(text(f"UPDATE sms_templates SET category = '{new_val}' WHERE category = '{old_val}'"))
+                                connection.execute(text("ALTER TABLE sms_templates ALTER COLUMN category TYPE sms_template_category USING category::sms_template_category"))
+                            else:
+                                connection.execute(text(f"ALTER TYPE sms_template_category RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ SMS template category normalization complete.")
+        except Exception as e:
+            print(f"[startup] ⚠️  SMS template category normalization warning: {e}")
+
+    # SMS Log Status
+    if _table_exists(inspector, "sms_logs"):
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                status_map = {
+                    'QUEUED': 'queued', 'SENDING': 'sending', 'SENT': 'sent', 
+                    'DELIVERED': 'delivered', 'FAILED': 'failed', 'SKIPPED': 'skipped', 'CANCELLED': 'cancelled'
+                }
+                result = connection.execute(text(
+                    "SELECT enumlabel FROM pg_enum "
+                    "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                    "WHERE typname = 'sms_log_status'"
+                )).fetchall()
+                db_enum_values = {row[0] for row in result}
+                if db_enum_values:
+                    for old_val, new_val in status_map.items():
+                        if old_val in db_enum_values:
+                            if new_val in db_enum_values:
+                                connection.execute(text("ALTER TABLE sms_logs ALTER COLUMN status TYPE text"))
+                                connection.execute(text(f"UPDATE sms_logs SET status = '{new_val}' WHERE status = '{old_val}'"))
+                                connection.execute(text("ALTER TABLE sms_logs ALTER COLUMN status TYPE sms_log_status USING status::sms_log_status"))
+                            else:
+                                connection.execute(text(f"ALTER TYPE sms_log_status RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ SMS log status normalization complete.")
+        except Exception as e:
+            print(f"[startup] ⚠️  SMS log status normalization warning: {e}")
+
+    # SMS Campaign Status
+    if _table_exists(inspector, "sms_campaigns"):
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                status_map = {'DRAFT': 'draft', 'SCHEDULED': 'scheduled', 'RUNNING': 'running', 'COMPLETED': 'completed', 'CANCELLED': 'cancelled'}
+                result = connection.execute(text(
+                    "SELECT enumlabel FROM pg_enum "
+                    "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                    "WHERE typname = 'sms_campaign_status'"
+                )).fetchall()
+                db_enum_values = {row[0] for row in result}
+                if db_enum_values:
+                    for old_val, new_val in status_map.items():
+                        if old_val in db_enum_values:
+                            if new_val in db_enum_values:
+                                connection.execute(text("ALTER TABLE sms_campaigns ALTER COLUMN status TYPE text"))
+                                connection.execute(text(f"UPDATE sms_campaigns SET status = '{new_val}' WHERE status = '{old_val}'"))
+                                connection.execute(text("ALTER TABLE sms_campaigns ALTER COLUMN status TYPE sms_campaign_status USING status::sms_campaign_status"))
+                            else:
+                                connection.execute(text(f"ALTER TYPE sms_campaign_status RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ SMS campaign status normalization complete.")
+        except Exception as e:
+            print(f"[startup] ⚠️  SMS campaign status normalization warning: {e}")
+
+
+def normalize_supplier_enum_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "supplier_payments"):
+        return
+    payment_map = {'CHEQUE': 'Cheque', 'BANK_TRANSFER': 'Bank Transfer', 'MONEY': 'Money'}
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'supplier_payment_method'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+            if db_enum_values:
+                for old_val, new_val in payment_map.items():
+                    if old_val in db_enum_values:
+                        if new_val in db_enum_values:
+                            connection.execute(text("ALTER TABLE supplier_payments ALTER COLUMN method TYPE text"))
+                            connection.execute(text(f"UPDATE supplier_payments SET method = '{new_val}' WHERE method = '{old_val}'"))
+                            connection.execute(text("ALTER TABLE supplier_payments ALTER COLUMN method TYPE supplier_payment_method USING method::supplier_payment_method"))
+                        else:
+                            connection.execute(text(f"ALTER TYPE supplier_payment_method RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ Supplier payment method normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Supplier payment method normalization warning: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
@@ -541,6 +651,8 @@ async def lifespan(_: FastAPI):
     normalize_completion_status_data()
     normalize_payment_method_data()
     normalize_material_sale_status_data()
+    normalize_sms_enum_data()
+    normalize_supplier_enum_data()
     ensure_order_status_support()
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()
