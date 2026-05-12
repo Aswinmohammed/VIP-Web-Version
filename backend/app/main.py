@@ -357,6 +357,178 @@ def normalize_order_status_data() -> None:
         print(f"[startup] ⚠️  Status normalization warning (non-fatal): {e}")
 
 
+def normalize_user_role_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "users"):
+        return
+    role_map = {
+        'MASTER_ADMIN': 'master_admin',
+        'BRANCH_ADMIN': 'branch_admin',
+    }
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'user_role'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+            if not db_enum_values:
+                return
+            for old_val, new_val in role_map.items():
+                if old_val in db_enum_values:
+                    if new_val in db_enum_values:
+                        connection.execute(text("ALTER TABLE users ALTER COLUMN role TYPE text"))
+                        connection.execute(text(f"UPDATE users SET role = '{new_val}' WHERE role = '{old_val}'"))
+                        connection.execute(text("ALTER TABLE users ALTER COLUMN role TYPE user_role USING role::user_role"))
+                    else:
+                        connection.execute(text(f"ALTER TYPE user_role RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ User role data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  User role normalization warning: {e}")
+
+
+def normalize_employee_type_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "employees"):
+        return
+    type_map = {
+        'CUT_BASE': 'CutBase',
+        'HOUR_BASE': 'HourBase',
+        'BRANCH_EMPLOYEE': 'BranchEmployee',
+    }
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'employee_type'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+            if not db_enum_values:
+                return
+            for old_val, new_val in type_map.items():
+                if old_val in db_enum_values:
+                    if new_val in db_enum_values:
+                        connection.execute(text("ALTER TABLE employees ALTER COLUMN type TYPE text"))
+                        connection.execute(text(f"UPDATE employees SET type = '{new_val}' WHERE type = '{old_val}'"))
+                        connection.execute(text("ALTER TABLE employees ALTER COLUMN type TYPE employee_type USING type::employee_type"))
+                    else:
+                        connection.execute(text(f"ALTER TYPE employee_type RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ Employee type data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Employee type normalization warning: {e}")
+
+
+def normalize_completion_status_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "order_items"):
+        return
+    status_map = {
+        'PENDING': 'pending',
+        'PARTIAL': 'partial',
+        'COMPLETED': 'completed',
+    }
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'completion_status'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+            if not db_enum_values:
+                return
+            for old_val, new_val in status_map.items():
+                if old_val in db_enum_values:
+                    if new_val in db_enum_values:
+                        connection.execute(text("ALTER TABLE order_items ALTER COLUMN completion_status TYPE text"))
+                        connection.execute(text(f"UPDATE order_items SET completion_status = '{new_val}' WHERE completion_status = '{old_val}'"))
+                        connection.execute(text("ALTER TABLE order_items ALTER COLUMN completion_status TYPE completion_status USING completion_status::completion_status"))
+                    else:
+                        connection.execute(text(f"ALTER TYPE completion_status RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ Completion status data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Completion status normalization warning: {e}")
+
+
+def normalize_payment_method_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    payment_map = {
+        'CASH': 'Cash',
+        'CARD': 'Card',
+        'BANK_TRANSFER': 'Bank Transfer',
+        'CHEQUE': 'Cheque',
+    }
+    # Tables with payment method: payments, material_sales
+    tables = [("payments", "method", "payment_method"), ("material_sales", "payment_method", "material_sale_payment_method")]
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for table_name, col_name, type_name in tables:
+                if not _table_exists(inspector, table_name):
+                    continue
+                result = connection.execute(text(
+                    f"SELECT enumlabel FROM pg_enum "
+                    f"JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                    f"WHERE typname = '{type_name}'"
+                )).fetchall()
+                db_enum_values = {row[0] for row in result}
+                if not db_enum_values:
+                    continue
+                for old_val, new_val in payment_map.items():
+                    if old_val in db_enum_values:
+                        if new_val in db_enum_values:
+                            connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN {col_name} TYPE text"))
+                            connection.execute(text(f"UPDATE {table_name} SET {col_name} = '{new_val}' WHERE {col_name} = '{old_val}'"))
+                            connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN {col_name} TYPE {type_name} USING {col_name}::{type_name}"))
+                        else:
+                            connection.execute(text(f"ALTER TYPE {type_name} RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ Payment method data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Payment method normalization warning: {e}")
+
+
+def normalize_material_sale_status_data() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "material_sales"):
+        return
+    status_map = {
+        'PAID': 'Paid',
+        'DUE': 'Due',
+    }
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            result = connection.execute(text(
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "WHERE typname = 'material_sale_status'"
+            )).fetchall()
+            db_enum_values = {row[0] for row in result}
+            if not db_enum_values:
+                return
+            for old_val, new_val in status_map.items():
+                if old_val in db_enum_values:
+                    if new_val in db_enum_values:
+                        connection.execute(text("ALTER TABLE material_sales ALTER COLUMN status TYPE text"))
+                        connection.execute(text(f"UPDATE material_sales SET status = '{new_val}' WHERE status = '{old_val}'"))
+                        connection.execute(text("ALTER TABLE material_sales ALTER COLUMN status TYPE material_sale_status USING status::material_sale_status"))
+                    else:
+                        connection.execute(text(f"ALTER TYPE material_sale_status RENAME VALUE '{old_val}' TO '{new_val}'"))
+            print("[startup] ✅ Material sale status data normalization complete.")
+    except Exception as e:
+        print(f"[startup] ⚠️  Material sale status normalization warning: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
@@ -364,6 +536,11 @@ async def lifespan(_: FastAPI):
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
     normalize_order_status_data()
+    normalize_user_role_data()
+    normalize_employee_type_data()
+    normalize_completion_status_data()
+    normalize_payment_method_data()
+    normalize_material_sale_status_data()
     ensure_order_status_support()
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()

@@ -144,7 +144,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, TenantScopedMixin, Base):
     branch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(150), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x]), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
@@ -177,7 +177,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixi
     order_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name="order_status"), nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name="order_status", values_callable=lambda x: [e.value for e in x]), nullable=False)
     discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     advance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     emergency: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -212,7 +212,7 @@ class OrderItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyId
     completed_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completion_data: Mapped[list[bool] | None] = mapped_column(JSON, nullable=True)
     completion_status: Mapped[CompletionStatus] = mapped_column(
-        Enum(CompletionStatus, name="completion_status"),
+        Enum(CompletionStatus, name="completion_status", values_callable=lambda x: [e.value for e in x]),
         default=CompletionStatus.PENDING,
         nullable=False,
     )
@@ -259,7 +259,7 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMi
     collector_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
-    method: Mapped[PaymentMethod | None] = mapped_column(Enum(PaymentMethod, name="payment_method"), nullable=True)
+    method: Mapped[PaymentMethod | None] = mapped_column(Enum(PaymentMethod, name="payment_method", values_callable=lambda x: [e.value for e in x]), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     order: Mapped["Order"] = relationship(back_populates="payments")
@@ -297,9 +297,9 @@ class MaterialSale(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Legac
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
-    payment_method: Mapped[PaymentMethod | None] = mapped_column(Enum(PaymentMethod, name="material_sale_payment_method"), nullable=True)
+    payment_method: Mapped[PaymentMethod | None] = mapped_column(Enum(PaymentMethod, name="material_sale_payment_method", values_callable=lambda x: [e.value for e in x]), nullable=True)
     customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[MaterialSaleStatus | None] = mapped_column(Enum(MaterialSaleStatus, name="material_sale_status"), nullable=True)
+    status: Mapped[MaterialSaleStatus | None] = mapped_column(Enum(MaterialSaleStatus, name="material_sale_status", values_callable=lambda x: [e.value for e in x]), nullable=True)
 
     items: Mapped[list["MaterialSaleItem"]] = relationship(back_populates="material_sale", cascade="all, delete-orphan")
 
@@ -326,7 +326,7 @@ class Employee(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdM
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    type: Mapped[EmployeeType] = mapped_column(Enum(EmployeeType, name="employee_type"), nullable=False)
+    type: Mapped[EmployeeType] = mapped_column(Enum(EmployeeType, name="employee_type", values_callable=lambda x: [e.value for e in x]), nullable=False)
     salary_source_branch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True)
     piece_rates: Mapped[dict[str, float] | None] = mapped_column(JSON, nullable=True)
     branch_piece_rate_history: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
@@ -405,7 +405,7 @@ class SupplierPayment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Le
     supplier_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
-    method: Mapped[SupplierPaymentMethod] = mapped_column(Enum(SupplierPaymentMethod, name="supplier_payment_method"), nullable=False)
+    method: Mapped[SupplierPaymentMethod] = mapped_column(Enum(SupplierPaymentMethod, name="supplier_payment_method", values_callable=lambda x: [e.value for e in x]), nullable=False)
     recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -440,7 +440,7 @@ class SmsTemplate(UUIDPrimaryKeyMixin, TimestampMixin, TenantScopedMixin, Base):
     branch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), nullable=True, index=True)
     code: Mapped[str] = mapped_column(String(120), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    category: Mapped[SmsTemplateCategory] = mapped_column(Enum(SmsTemplateCategory, name="sms_template_category"), nullable=False)
+    category: Mapped[SmsTemplateCategory] = mapped_column(Enum(SmsTemplateCategory, name="sms_template_category", values_callable=lambda x: [e.value for e in x]), nullable=False)
     trigger_event: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -458,7 +458,7 @@ class SmsCampaign(UUIDPrimaryKeyMixin, TimestampMixin, TenantScopedMixin, Base):
     template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sms_templates.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     campaign_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    status: Mapped[SmsCampaignStatus] = mapped_column(Enum(SmsCampaignStatus, name="sms_campaign_status"), nullable=False, default=SmsCampaignStatus.DRAFT)
+    status: Mapped[SmsCampaignStatus] = mapped_column(Enum(SmsCampaignStatus, name="sms_campaign_status", values_callable=lambda x: [e.value for e in x]), nullable=False, default=SmsCampaignStatus.DRAFT)
     message_template: Mapped[str] = mapped_column(Text, nullable=False)
     filter_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     recipient_count_estimate: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -488,7 +488,7 @@ class SmsLog(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Base):
     phone_raw: Mapped[str | None] = mapped_column(String(64), nullable=True)
     phone_normalized: Mapped[str | None] = mapped_column(String(32), nullable=True)
     message_body: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[SmsLogStatus] = mapped_column(Enum(SmsLogStatus, name="sms_log_status"), nullable=False, default=SmsLogStatus.QUEUED)
+    status: Mapped[SmsLogStatus] = mapped_column(Enum(SmsLogStatus, name="sms_log_status", values_callable=lambda x: [e.value for e in x]), nullable=False, default=SmsLogStatus.QUEUED)
     provider_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     segment_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
