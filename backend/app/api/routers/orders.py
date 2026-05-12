@@ -387,6 +387,7 @@ def list_production_notifications(
         )
         .order_by(Order.created_at.desc())
         .limit(1)
+        .correlate(Branch)
         .scalar_subquery()
     )
 
