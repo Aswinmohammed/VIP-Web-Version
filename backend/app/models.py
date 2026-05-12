@@ -177,7 +177,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixi
     order_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name="order_status"), nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name="order_status", values_callable=lambda e: [x.value for x in e]), nullable=False)
     discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     advance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     emergency: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

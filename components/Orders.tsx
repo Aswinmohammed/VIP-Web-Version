@@ -997,11 +997,19 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         return true;
       }
 
-      // For pure-numeric searches, also match against just the numeric portion of the order ID
-      // e.g., searching "141" matches "ORD-0141" by comparing digits "0141" contains "141"
+      // For pure-numeric searches, match against just the numeric portion of the order ID
+      // Use exact match: "141" should match ORD-0141 (digits "0141" ends with "141")
+      // but NOT ORD-1410 or ORD-2141
       if (isDigitsOnlySearch) {
         const orderIdDigits = orderId.replace(/\D/g, '');
-        if (orderIdDigits.includes(searchDigitsOnly)) {
+        // Exact match: the numeric search must equal the order's digits (with leading zeros stripped)
+        const orderIdDigitsStripped = orderIdDigits.replace(/^0+/, '') || '0';
+        const searchStripped = searchDigitsOnly.replace(/^0+/, '') || '0';
+        if (orderIdDigitsStripped === searchStripped || orderIdDigits === searchDigitsOnly) {
+          return true;
+        }
+        // Also allow trailing match for partial typed IDs: "41" matches "0041" but not "0410"
+        if (orderIdDigits.endsWith(searchDigitsOnly)) {
           return true;
         }
       }
@@ -1012,11 +1020,12 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         return true;
       }
 
-      // Phone number matching: normalize both by stripping all non-digit characters
+      // Phone number matching: only do partial match if search is long enough (5+ digits)
+      // to avoid short order ID numbers matching phone numbers
       const customerPhone = getCustomerPhone(order);
       const phoneDigits = customerPhone.replace(/\D/g, '');
       const searchPhoneDigits = lowerSearchTerm.replace(/\D/g, '');
-      if (searchPhoneDigits.length > 0 && phoneDigits.includes(searchPhoneDigits)) {
+      if (searchPhoneDigits.length >= 5 && phoneDigits.includes(searchPhoneDigits)) {
         return true;
       }
       // Also try raw string match for phone
