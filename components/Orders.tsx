@@ -261,6 +261,13 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
   );
 };
 
+const formatDateSafe = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString();
+};
+
 const formatPhoneNumber = (phone: string) => {
     if (!phone) return '';
     const cleaned = ('' + phone).replace(/\D/g, '');
@@ -314,7 +321,7 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
       setOrders(prev => prev.map(o => {
         if (o.id !== orderId) return o;
         if (clear) return { ...o, isCalled: false, calledTimestamp: undefined, callHistory: [] };
-        const now = new Date().toLocaleString();
+        const now = new Date().toISOString();
         return {
           ...o,
           isCalled: true,
@@ -592,7 +599,7 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                                 {o.callHistory.map((h, i) => (
                                   <div key={i} className="text-[11px] font-medium flex items-center justify-between">
                                     <span className="text-emerald-400 flex items-center"><div className="w-1 h-1 rounded-full bg-emerald-500 mr-2" /> Call {i + 1}</span>
-                                    <span className="text-slate-300">{h.split(',')[0]}</span>
+                                    <span className="text-slate-300">{formatDateSafe(h).split(',')[0]}</span>
                                   </div>
                                 ))}
                               </div>
@@ -618,7 +625,7 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                       </div>
                       {o.isCalled && (
                         <div className="mt-1.5 flex items-center text-[9px] text-emerald-700 font-black bg-emerald-100/50 w-fit px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-tighter shadow-sm animate-in fade-in slide-in-from-top-1">
-                          <PhoneCall size={10} className="mr-1" /> LAST CALLED: {o.calledTimestamp}
+                          <PhoneCall size={10} className="mr-1" /> LAST CALLED: {formatDateSafe(o.calledTimestamp)}
                         </div>
                       )}
                     </td>
@@ -977,7 +984,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       if (statusFilter === 'Emergency') {
         if (!order.emergency) return false;
       } else if (statusFilter !== 'All') {
-        if (orderStatus.toLowerCase() !== statusFilter.toLowerCase()) return false;
+        if (orderStatus.trim().toLowerCase() !== statusFilter.trim().toLowerCase()) return false;
       }
 
       // ── Date range filter (compare date parts only) ──
@@ -1006,16 +1013,20 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         }
 
         // ── ID Search ──
-        const orderIdNormalized = orderIdStr.toLowerCase(); // e.g. "ord-0141"
-        const orderIdDigits = orderIdStr.replace(/\D/g, ''); // e.g. "0141"
-        const orderIdDigitsStripped = orderIdNormalized.replace(/\D/g, '').replace(/^0+/, ''); // e.g. "141"
+        const orderIdNormalized = orderIdStr.trim().toLowerCase(); 
+        const orderIdDigits = orderIdStr.replace(/\D/g, ''); 
+        const orderIdStripped = orderIdDigits.replace(/^0+/, ''); 
 
-        if (searchDigitsOnly.length >= 2) {
-          // Exact match (stripped) or exact digit match to prevent false positives
-          // e.g. searching "141" strictly matches "ORD-0141" but NOT "1141"
-          if (orderIdDigitsStripped === searchStripped || orderIdDigits === searchDigitsOnly) {
+        const searchDigits = cleanSearch.replace(/\D/g, '');
+        const searchStrippedZeros = searchDigits.replace(/^0+/, '');
+
+        if (searchDigits) {
+          // Strict match to prevent false positives (e.g. searching 14 strictly matches ORD-14, not 141)
+          if (orderIdStripped === searchStrippedZeros || orderIdDigits === searchDigits) {
             return true;
           }
+        } else if (orderIdNormalized === cleanSearch || orderIdNormalized === `ord-${cleanSearch}`) {
+          return true;
         }
 
         // ── Phone Number Search ──
