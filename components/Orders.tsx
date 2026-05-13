@@ -989,14 +989,19 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       }
 
       // ── Search filter ──
-      if (searchTerm) {
-        const lowerSearch = searchTerm.toLowerCase();
-        const searchStripped = lowerSearch.replace(/\s+/g, '').replace(/^ord-/i, '');
-        const searchDigitsOnly = searchTerm.replace(/\D/g, '');
+      const cleanSearch = searchTerm.trim().toLowerCase();
+      if (cleanSearch) {
+        const searchStripped = cleanSearch.replace(/\s+/g, '').replace(/^ord-/i, '');
+        const searchDigitsOnly = cleanSearch.replace(/\D/g, '');
 
         // ── Customer Name Search ──
         const customerName = getCustomerName(order).toLowerCase();
-        if (customerName.includes(lowerSearch)) {
+        // Check if any word in the customer name starts with the search term
+        // This is stricter than .includes() and prevents many false positives
+        const nameWords = customerName.split(/\s+/);
+        const matchesName = nameWords.some(word => word.startsWith(cleanSearch)) || customerName.includes(cleanSearch);
+        
+        if (matchesName) {
           return true;
         }
 
@@ -1006,12 +1011,9 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         const orderIdDigitsStripped = orderIdNormalized.replace(/\D/g, '').replace(/^0+/, ''); // e.g. "141"
 
         if (searchDigitsOnly.length >= 2) {
-          // Exact match (stripped) or exact digit match
+          // Exact match (stripped) or exact digit match to prevent false positives
+          // e.g. searching "141" strictly matches "ORD-0141" but NOT "1141"
           if (orderIdDigitsStripped === searchStripped || orderIdDigits === searchDigitsOnly) {
-            return true;
-          }
-          // Also allow trailing match for partial typed IDs: "41" matches "0041" but not "0410"
-          if (orderIdDigits.endsWith(searchDigitsOnly)) {
             return true;
           }
         }
@@ -1019,7 +1021,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         // ── Phone Number Search ──
         const customerPhone = getCustomerPhone(order);
         const phoneDigits = customerPhone.replace(/\D/g, '');
-        const searchPhoneDigits = searchTerm.replace(/\D/g, '');
+        const searchPhoneDigits = cleanSearch.replace(/\D/g, '');
 
         // Only search by phone if search term has at least 5 digits (to avoid ID collision)
         if (searchPhoneDigits.length >= 5 && phoneDigits.includes(searchPhoneDigits)) {
@@ -1031,7 +1033,10 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
       return true;
     }).sort((a, b) => {
-      // Sort by numeric part of order id descending (newest first)
+      // Sort time-wise: primarily by order date descending, then by order ID descending
+      const dateDiff = new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      
       const getNum = (idStr: string | number) => {
         const match = String(idStr).match(/\d+/);
         return match ? parseInt(match[0], 10) : 0;
@@ -1060,12 +1065,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     { label: 'Due Orders', value: 'Due' },
     { label: 'Emergency Orders', value: 'Emergency' },
   ];
-  const incomingProductionOrders = useMemo(() => {
-    if (!currentBranch || !currentBranch.accessAreas.includes('orders')) {
-      return [];
-    }
-    return filteredOrders.filter((order) => order.branchId && order.branchId !== currentBranch.id);
-  }, [currentBranch, filteredOrders]);
+
 
   return (
     <div className="space-y-6">
@@ -1131,66 +1131,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         </div>
       )}
 
-      {incomingProductionOrders.length > 0 && (
-        <div className="bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between border-b border-amber-100 bg-amber-50 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-900">Production Intake Notifications</h2>
-              <p className="text-sm text-slate-600">Orders received from sub branches are shown here with full details for the main production branch.</p>
-            </div>
-            <div className="rounded-full bg-red-600 px-3 py-1 text-xs font-black uppercase tracking-widest text-white">
-              {incomingProductionOrders.length} Incoming
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-gray-600">
-              <thead className="bg-slate-50 text-xs uppercase tracking-widest text-slate-500">
-                <tr>
-                  <th className="px-6 py-3">Branch</th>
-                  <th className="px-6 py-3">Order ID</th>
-                  <th className="px-6 py-3">Customer</th>
-                  <th className="px-6 py-3">Order Date</th>
-                  <th className="px-6 py-3">Due Date</th>
-                  <th className="px-6 py-3">Total</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {incomingProductionOrders.map((order) => (
-                  <tr key={`incoming-${order.id}`} className="hover:bg-amber-50/40">
-                    <td className="px-6 py-4">
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                        {getOrderBranchName(order)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 font-bold text-slate-900">{formatOrderId(order.id)}</td>
-                    <td className="px-6 py-4">
-                      <div className="font-semibold text-slate-900">{getCustomerName(order)}</div>
-                      <div className="text-emerald-600 font-bold text-[13px]">{formatPhoneNumber(getCustomerPhone(order))}</div>
-                    </td>
-                    <td className="px-6 py-4">{order.orderDate}</td>
-                    <td className="px-6 py-4">{order.dueDate || '-'}</td>
-                    <td className="px-6 py-4 font-bold text-slate-900">Rs. {order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span className={getStatusChip(order.status)}>{order.status}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex justify-center space-x-1">
-                        {canOpenCutSheet && <button onClick={() => setViewingMeasurementsOrder(order)} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md" title="Cut Sheet"><Scissors size={18} /></button>}
-                        {canTrackCompletion && <button onClick={() => setTrackingOrder(order)} className="p-1.5 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-md" title="Track Dress Completion"><Package size={18} /></button>}
-                        {canOpenInvoice && <button onClick={() => navigate('Invoice', order.id)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-md" title="Invoice"><Eye size={18} /></button>}
-                        {canEditOrder && <button onClick={() => navigate('Edit Order', order.id)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md" title="Edit"><Edit size={18} /></button>}
-                        {canDeleteOrder && <button onClick={() => handleDelete(order.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-md" title="Delete"><Trash2 size={18} /></button>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+
 
       <div className="space-y-4 md:hidden">
         {filteredOrders.length > 0 ? filteredOrders.map((order) => (

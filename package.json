@@ -19,6 +19,7 @@
     "tailwind-merge": "^1.14.0"
   },
   "devDependencies": {
+    "@types/node": "^25.7.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.0.3",
