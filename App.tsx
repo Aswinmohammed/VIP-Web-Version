@@ -707,6 +707,8 @@ const App: React.FC = () => {
         applyDatasetState(dataset, data as DatasetCacheEntry[CloudDataset]);
       });
       lastCloudRefreshAtRef.current = Date.now();
+    } catch (error) {
+      console.error(`Failed to load datasets for page ${targetPage}:`, error);
     } finally {
       if (shouldShowPageLoader) {
         setIsPageLoading(false);

@@ -969,75 +969,71 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
 
   const filteredOrders = useMemo(() => {
-    const lowerSearchTerm = searchTerm.trim().toLowerCase();
-    // Pre-compute a digits-only version for numeric-only searches (e.g. "141" to find "ORD-0141")
-    const searchDigitsOnly = lowerSearchTerm.replace(/\D/g, '');
-    const searchNormalized = lowerSearchTerm.replace(/[-\s]/g, '');
-    const isDigitsOnlySearch = searchDigitsOnly.length > 0 && searchDigitsOnly === lowerSearchTerm;
-
     return orders.filter(order => {
-      // ── Status filter (strict match) ──
+      const orderStatus = String(order.status || '');
+      const orderIdStr = String(order.id || '');
+
+      // ── Status filter (strict match with case insensitivity for robustness) ──
       if (statusFilter === 'Emergency') {
         if (!order.emergency) return false;
       } else if (statusFilter !== 'All') {
-        if (order.status !== statusFilter) return false;
+        if (orderStatus.toLowerCase() !== statusFilter.toLowerCase()) return false;
       }
 
-      // ── Date range filter ──
-      if (fromDate && order.orderDate < fromDate) return false;
-      if (toDate && order.orderDate > toDate) return false;
+      // ── Date range filter (compare date parts only) ──
+      if (fromDate || toDate) {
+        // Extract YYYY-MM-DD part from ISO strings
+        const orderDateOnly = order.orderDate.split('T')[0];
+        if (fromDate && orderDateOnly < fromDate) return false;
+        if (toDate && orderDateOnly > toDate) return false;
+      }
 
       // ── Search filter ──
-      if (!lowerSearchTerm) return true;
+      if (searchTerm) {
+        const lowerSearch = searchTerm.toLowerCase();
+        const searchStripped = lowerSearch.replace(/\s+/g, '').replace(/^ord-/i, '');
+        const searchDigitsOnly = searchTerm.replace(/\D/g, '');
 
-      // Order ID matching: normalize by stripping dashes/spaces
-      const orderId = order.id.toLowerCase();
-      const orderIdNormalized = orderId.replace(/[-\s]/g, '');
-      if (orderId.includes(lowerSearchTerm) || orderIdNormalized.includes(searchNormalized)) {
-        return true;
-      }
-
-      // For pure-numeric searches, match against just the numeric portion of the order ID
-      // Use exact match: "141" should match ORD-0141 (digits "0141" ends with "141")
-      // but NOT ORD-1410 or ORD-2141
-      if (isDigitsOnlySearch) {
-        const orderIdDigits = orderId.replace(/\D/g, '');
-        // Exact match: the numeric search must equal the order's digits (with leading zeros stripped)
-        const orderIdDigitsStripped = orderIdDigits.replace(/^0+/, '') || '0';
-        const searchStripped = searchDigitsOnly.replace(/^0+/, '') || '0';
-        if (orderIdDigitsStripped === searchStripped || orderIdDigits === searchDigitsOnly) {
+        // ── Customer Name Search ──
+        const customerName = getCustomerName(order).toLowerCase();
+        if (customerName.includes(lowerSearch)) {
           return true;
         }
-        // Also allow trailing match for partial typed IDs: "41" matches "0041" but not "0410"
-        if (orderIdDigits.endsWith(searchDigitsOnly)) {
+
+        // ── ID Search ──
+        const orderIdNormalized = orderIdStr.toLowerCase(); // e.g. "ord-0141"
+        const orderIdDigits = orderIdStr.replace(/\D/g, ''); // e.g. "0141"
+        const orderIdDigitsStripped = orderIdNormalized.replace(/\D/g, '').replace(/^0+/, ''); // e.g. "141"
+
+        if (searchDigitsOnly.length >= 2) {
+          // Exact match (stripped) or exact digit match
+          if (orderIdDigitsStripped === searchStripped || orderIdDigits === searchDigitsOnly) {
+            return true;
+          }
+          // Also allow trailing match for partial typed IDs: "41" matches "0041" but not "0410"
+          if (orderIdDigits.endsWith(searchDigitsOnly)) {
+            return true;
+          }
+        }
+
+        // ── Phone Number Search ──
+        const customerPhone = getCustomerPhone(order);
+        const phoneDigits = customerPhone.replace(/\D/g, '');
+        const searchPhoneDigits = searchTerm.replace(/\D/g, '');
+
+        // Only search by phone if search term has at least 5 digits (to avoid ID collision)
+        if (searchPhoneDigits.length >= 5 && phoneDigits.includes(searchPhoneDigits)) {
           return true;
         }
+
+        return false; // None of the search criteria matched
       }
 
-      // Customer name matching
-      const customerName = getCustomerName(order).toLowerCase();
-      if (customerName.includes(lowerSearchTerm)) {
-        return true;
-      }
-
-      // Phone number matching: only do partial match if search is long enough (5+ digits)
-      // to avoid short order ID numbers matching phone numbers
-      const customerPhone = getCustomerPhone(order);
-      const phoneDigits = customerPhone.replace(/\D/g, '');
-      const searchPhoneDigits = lowerSearchTerm.replace(/\D/g, '');
-      if (searchPhoneDigits.length >= 5 && phoneDigits.includes(searchPhoneDigits)) {
-        return true;
-      }
-      // Also try raw string match for phone
-      if (customerPhone.toLowerCase().includes(lowerSearchTerm)) {
-        return true;
-      }
-
-      return false;
+      return true;
     }).sort((a, b) => {
       // Sort by numeric part of order id descending (newest first)
-      const getNum = (id: string) => {
-        const match = id.match(/\d+/);
+      const getNum = (idStr: string | number) => {
+        const match = String(idStr).match(/\d+/);
         return match ? parseInt(match[0], 10) : 0;
       };
       return getNum(b.id) - getNum(a.id);

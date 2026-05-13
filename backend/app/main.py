@@ -314,26 +314,33 @@ def normalize_order_status_data() -> None:
                     "USING status::order_status"
                 ))
                 print("[startup] Restored orders.status column type to order_status enum.")
-            else:
-                # Enum labels are already correct — check if any row data is stale uppercase
+            # Enum labels are already correct — check if any row data is stale (wrong case)
                 try:
+                    # Look for any row where the status text (case-insensitive) matches our known statuses
+                    # but the actual case is not the canonical mixed-case version.
                     stale_check = connection.execute(text(
                         "SELECT DISTINCT status::text FROM orders "
-                        "WHERE status::text = ANY(ARRAY['PENDING','IN_PROGRESS','COMPLETED',"
-                        "'PACKED','DUE','DELIVERED','HOLD'])"
+                        "WHERE LOWER(status::text) IN ('pending','in_progress','completed','packed','due','delivered','hold') "
+                        "AND status::text NOT IN ('Pending','In Progress','Completed','Packed','Due','Delivered','Hold')"
                     )).fetchall()
                     stale_values = [row[0] for row in stale_check]
-
+ 
                     if stale_values:
-                        print(f"[startup] Found stale status values in rows: {stale_values} — fixing...")
+                        print(f"[startup] Found stale/wrong-case status values in rows: {stale_values} — fixing...")
                         connection.execute(text(
                             "ALTER TABLE orders ALTER COLUMN status TYPE text"
                         ))
-                        for old_val, new_val in status_map.items():
+                        # Create a case-insensitive map
+                        ci_status_map = {k.lower(): v for k, v in status_map.items()}
+                        # Also add the mixed-case values as keys to be safe
+                        for v in status_map.values():
+                            ci_status_map[v.lower()] = v
+
+                        for old_val_lower, canonical_val in ci_status_map.items():
                             connection.execute(text(
-                                f"UPDATE orders SET status = '{new_val}' WHERE status = '{old_val}'"
+                                f"UPDATE orders SET status = '{canonical_val}' WHERE LOWER(status) = '{old_val_lower}' AND status <> '{canonical_val}'"
                             ))
-                            print(f"[startup] Fixed row data '{old_val}' → '{new_val}'")
+                        
                         connection.execute(text(
                             "ALTER TABLE orders ALTER COLUMN status TYPE order_status "
                             "USING status::order_status"
