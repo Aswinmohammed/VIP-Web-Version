@@ -432,6 +432,29 @@ def delete_employee_salary_payment(
     db.commit()
 
 
+@router.delete("/{employee_id}/clear-details", status_code=status.HTTP_204_NO_CONTENT)
+def clear_employee_details(
+    employee_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> None:
+    employee = _get_employee_or_404(db, actor, employee_id)
+
+    db.execute(
+        delete(EmployeeWorkLog).where(
+            EmployeeWorkLog.employee_id == employee.id,
+            EmployeeWorkLog.tenant_id == actor.tenant_id,
+        )
+    )
+    db.execute(
+        delete(EmployeeSalaryPayment).where(
+            EmployeeSalaryPayment.employee_id == employee.id,
+            EmployeeSalaryPayment.tenant_id == actor.tenant_id,
+        )
+    )
+    db.commit()
+
+
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_employee(
     employee_id: uuid.UUID,

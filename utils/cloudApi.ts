@@ -1477,6 +1477,13 @@ export async function deleteCloudEmployeeSalaryPayment(token: string, employeeId
   });
 }
 
+export async function clearCloudEmployeeSalaryDetails(token: string, employeeId: string): Promise<void> {
+  await apiRequest<void>(`/employees/${employeeId}/clear-details`, {
+    method: 'DELETE',
+    headers: jsonHeaders(token),
+  });
+}
+
 export async function createCloudSupplier(token: string, supplier: Supplier): Promise<Supplier> {
   const response = await apiRequest<ApiSupplier>('/suppliers', {
     method: 'POST',

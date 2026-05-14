@@ -106,6 +106,7 @@ const EmployeeManagement: React.FC = () => {
         deleteEmployeeWorkLog,
         saveEmployeeSalaryPayment,
         deleteEmployeeSalaryPayment,
+        clearEmployeeSalaryDetails,
         deleteEmployeeRecord,
         isAllBranchesScope,
         getBranchName,
@@ -458,6 +459,17 @@ const EmployeeManagement: React.FC = () => {
         }
     };
 
+    const handleClearDetails = async () => {
+        if (!selectedEmployee) return;
+        if (window.confirm(`Are you sure you want to clear ALL salary and work details for ${selectedEmployee.name}? This action cannot be undone.`)) {
+            try {
+                await clearEmployeeSalaryDetails(selectedEmployee.id);
+            } catch (error) {
+                console.error(error);
+            }
+        }
+    };
+
     const handlePrint = () => {
         window.print();
     };
@@ -739,6 +751,12 @@ const EmployeeManagement: React.FC = () => {
                             <input type="date" value={dateFilter.to} onChange={e => setDateFilter({ ...dateFilter, to: e.target.value })} className="border rounded px-2 py-1 text-sm" />
                             {(dateFilter.from || dateFilter.to) && <button onClick={() => setDateFilter({ from: '', to: '' })}><X size={16} className="text-red-500" /></button>}
                         </div>
+                        <button 
+                            onClick={handleClearDetails}
+                            className="flex items-center px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold hover:bg-red-100 transition-colors"
+                        >
+                            <Trash2 size={18} className="mr-2" /> Clear
+                        </button>
                         <button onClick={handleSaveAsPDF} disabled={isGeneratingPDF} className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50">
                             {isGeneratingPDF ? <Save size={18} className="mr-2 animate-spin" /> : <Save size={18} className="mr-2" />} Save PDF
                         </button>

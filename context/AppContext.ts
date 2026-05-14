@@ -26,6 +26,7 @@ interface AppContextType {
   deleteEmployeeWorkLog: (employeeId: string, workLogId: string) => Promise<void>;
   saveEmployeeSalaryPayment: (employeeId: string, payment: SalaryPayment) => Promise<SalaryPayment>;
   deleteEmployeeSalaryPayment: (employeeId: string, paymentId: string) => Promise<void>;
+  clearEmployeeSalaryDetails: (employeeId: string) => Promise<void>;
   refreshCloudData: (options?: { silent?: boolean }) => Promise<void>;
   isPageLoading: boolean;
   pageLoadingLabel: string;

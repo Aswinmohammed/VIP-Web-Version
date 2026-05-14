@@ -21,6 +21,7 @@ import { Branch, CurrentUser, Customer, Employee, Expense, InventoryItem, Materi
 import {
   createCloudEmployee,
   createCloudEmployeeSalaryPayment,
+  clearCloudEmployeeSalaryDetails,
   createCloudEmployeeWorkLog,
   createCloudExpense,
   createCloudCustomer,
@@ -1188,6 +1189,37 @@ const App: React.FC = () => {
     }
   }, [ensureEmployeePersisted]);
 
+  const clearEmployeeSalaryDetails = useCallback(async (employeeId: string) => {
+    const token = accessTokenRef.current;
+    if (!token) {
+      throw new Error('You are not logged in.');
+    }
+
+    const persistedEmployeeId = await ensureEmployeePersisted(employeeId);
+
+    // Optimistic update
+    setEmployeesState((current) => current.map((employee) => {
+      const currentResolvedId = employeeIdAliasesRef.current.get(employee.id);
+      if (employee.id !== employeeId && employee.id !== persistedEmployeeId && currentResolvedId !== persistedEmployeeId) {
+        return employee;
+      }
+      return {
+        ...employee,
+        workLogs: [],
+        salaryPayments: [],
+      };
+    }));
+
+    try {
+      await clearCloudEmployeeSalaryDetails(token, persistedEmployeeId);
+    } catch (error) {
+      console.error('Clear employee salary details failed:', error);
+      window.alert(getErrorMessage(error));
+      void refreshCloudDataRef.current();
+      throw error;
+    }
+  }, [ensureEmployeePersisted]);
+
   const saveSupplier = useCallback(async (supplier: Supplier) => {
     const token = accessTokenRef.current;
     if (!token) {
@@ -1797,6 +1829,7 @@ const App: React.FC = () => {
       deleteEmployeeWorkLog,
       saveEmployeeSalaryPayment,
       deleteEmployeeSalaryPayment,
+      clearEmployeeSalaryDetails,
       refreshCloudData,
       isPageLoading,
       pageLoadingLabel,
