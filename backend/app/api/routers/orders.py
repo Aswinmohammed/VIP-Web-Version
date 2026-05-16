@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import SessionLocal, get_db
@@ -32,6 +32,14 @@ from backend.app.services.sms import (
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 PRODUCTION_STATUSES = {OrderStatus.IN_PROGRESS, OrderStatus.COMPLETED, OrderStatus.PACKED}
+ORDER_STATUS_BY_NORMALIZED_VALUE = {
+    status.value.strip().lower().replace("_", " "): status
+    for status in OrderStatus
+}
+ORDER_STATUS_BY_NORMALIZED_VALUE.update({
+    status.name.strip().lower().replace("_", " "): status
+    for status in OrderStatus
+})
 
 
 def _dispatch_immediate_sms_logs(db: Session, logs: list[object | None]) -> None:
@@ -68,6 +76,29 @@ def _schedule_immediate_sms_dispatch(background_tasks: BackgroundTasks | None, l
 def _build_measurement_legacy_id(source_id: str | None) -> str:
     base = (source_id or "MEAS").strip()[:80] or "MEAS"
     return f"{base}-{uuid.uuid4().hex}"
+
+
+def _normalize_order_status_filter(value: str | OrderStatus | None) -> OrderStatus | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, OrderStatus):
+        return value
+    normalized = value.strip().lower().replace("_", " ")
+    status_value = ORDER_STATUS_BY_NORMALIZED_VALUE.get(normalized)
+    if not status_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported order status filter: {value}")
+    return status_value
+
+
+def _digits_only(value: str | None) -> str:
+    return "".join(character for character in (value or "") if character.isdigit())
+
+
+def _normalized_phone_expression(column):
+    expression = func.coalesce(column, "")
+    for character in (" ", "-", "(", ")", "+", "."):
+        expression = func.replace(expression, character, "")
+    return expression
 
 
 def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
@@ -341,8 +372,13 @@ def _replace_order_payload(db: Session, actor: AuthenticatedActor, order: Order,
 @router.get("", response_model=list[OrderRead])
 def list_orders(
     branch_id: uuid.UUID | None = Query(default=None),
-    status_filter: OrderStatus | None = Query(default=None),
+    status_filter: str | None = Query(default=None),
     customer_id: uuid.UUID | None = Query(default=None),
+    search: str | None = Query(default=None, min_length=1, max_length=120),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[dict]:
@@ -357,10 +393,29 @@ def list_orders(
         Order.created_at.desc(),
     )
     stmt = _apply_order_scope(stmt, db, actor, branch_id)
-    if status_filter is not None:
-        stmt = stmt.where(Order.status == status_filter)
+    normalized_status_filter = _normalize_order_status_filter(status_filter)
+    if normalized_status_filter is not None:
+        stmt = stmt.where(Order.status == normalized_status_filter)
     if customer_id is not None:
         stmt = stmt.where(Order.customer_id == customer_id)
+    if from_date is not None:
+        stmt = stmt.where(Order.order_date >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(Order.order_date <= to_date)
+    if search:
+        search_text = search.strip()
+        search_digits = _digits_only(search_text)
+        customer_name_match = Customer.name.ilike(f"%{search_text}%")
+        order_number_match = Order.order_number.ilike(f"%{search_text}%")
+        search_conditions = [customer_name_match, order_number_match]
+        if search_digits:
+            normalized_phone = _normalized_phone_expression(Customer.phone)
+            search_conditions.append(normalized_phone.ilike(f"%{search_digits}%"))
+        stmt = stmt.join(Order.customer).where(or_(*search_conditions))
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return [_serialize_order(order) for order in db.scalars(stmt)]
 
 

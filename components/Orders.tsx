@@ -276,6 +276,9 @@ const formatPhoneNumber = (phone: string) => {
     return phone;
   };
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeSearchText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
 
 const getStatusChip = (status: Order['status']) => {
     const baseClasses = "px-2 py-1 text-xs font-semibold rounded-full";
@@ -742,6 +745,7 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
 const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const context = useContext(AppContext);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -758,6 +762,14 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const getCustomerPhone = useCallback((order: Order) => order.customerPhone || customersById.get(order.customerId)?.phone || '', [customersById]);
   const branchNameById = useMemo(() => new Map(branches.map((branch) => [branch.id, branch.name])), [branches]);
   const getOrderBranchName = (order: Order) => order.branchName || branchNameById.get(order.branchId || '') || getBranchName(order.branchId) || 'Unknown Branch';
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   useEffect(() => {
     if (!accessToken || !currentBranch || !currentBranch.accessAreas.includes('orders')) {
@@ -996,17 +1008,15 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       }
 
       // ── Search filter ──
-      const cleanSearch = searchTerm.trim().toLowerCase();
+      const cleanSearch = normalizeSearchText(debouncedSearchTerm);
       if (cleanSearch) {
-        const searchStripped = cleanSearch.replace(/\s+/g, '').replace(/^ord-/i, '');
-        const searchDigitsOnly = cleanSearch.replace(/\D/g, '');
+        const searchDigits = cleanSearch.replace(/\D/g, '');
+        const isNumericSearch = searchDigits.length > 0 && !/[a-z]/i.test(cleanSearch);
 
         // ── Customer Name Search ──
-        const customerName = getCustomerName(order).toLowerCase();
-        // Check if any word in the customer name starts with the search term
-        // This is stricter than .includes() and prevents many false positives
-        const nameWords = customerName.split(/\s+/);
-        const matchesName = nameWords.some(word => word.startsWith(cleanSearch)) || customerName.includes(cleanSearch);
+        const customerName = normalizeSearchText(getCustomerName(order));
+        const namePattern = new RegExp(`(^|\\s)${escapeRegExp(cleanSearch)}`, 'i');
+        const matchesName = !isNumericSearch && namePattern.test(customerName);
         
         if (matchesName) {
           return true;
@@ -1014,10 +1024,10 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
         // ── ID Search ──
         const orderIdNormalized = orderIdStr.trim().toLowerCase(); 
+        const orderIdCompact = orderIdNormalized.replace(/\s+/g, '');
         const orderIdDigits = orderIdStr.replace(/\D/g, ''); 
         const orderIdStripped = orderIdDigits.replace(/^0+/, ''); 
 
-        const searchDigits = cleanSearch.replace(/\D/g, '');
         const searchStrippedZeros = searchDigits.replace(/^0+/, '');
 
         if (searchDigits) {
@@ -1025,21 +1035,18 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           if (orderIdStripped === searchStrippedZeros || orderIdDigits === searchDigits) {
             return true;
           }
-        } else if (orderIdNormalized === cleanSearch || orderIdNormalized === `ord-${cleanSearch}`) {
+        } else if (orderIdCompact === cleanSearch.replace(/\s+/g, '') || orderIdCompact === `ord-${cleanSearch.replace(/\s+/g, '')}`) {
           return true;
         }
 
         // ── Phone Number Search ──
         const customerPhone = getCustomerPhone(order);
         const phoneDigits = customerPhone.replace(/\D/g, '');
-        const searchPhoneDigits = cleanSearch.replace(/\D/g, '');
-
-        // Only search by phone if search term has at least 5 digits (to avoid ID collision)
-        if (searchPhoneDigits.length >= 5 && phoneDigits.includes(searchPhoneDigits)) {
+        if (searchDigits.length >= 4 && phoneDigits.includes(searchDigits)) {
           return true;
         }
 
-        return false; // None of the search criteria matched
+        return false;
       }
 
       return true;
@@ -1054,7 +1061,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       };
       return getNum(b.id) - getNum(a.id);
     });
-  }, [orders, searchTerm, statusFilter, fromDate, toDate, getCustomerName, getCustomerPhone]);
+  }, [orders, debouncedSearchTerm, statusFilter, fromDate, toDate, getCustomerName, getCustomerPhone]);
 
   const showAddOrderButton = canAccessPage('Add Order');
   const canOpenCutSheet = canUseOrderAction('cut_sheet');

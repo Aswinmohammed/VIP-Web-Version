@@ -26,6 +26,17 @@ def test_build_measurement_legacy_id_uses_default_prefix_when_source_missing() -
     assert generated.startswith("MEAS-")
 
 
+def test_normalize_order_status_filter_accepts_value_case_insensitively() -> None:
+    assert orders._normalize_order_status_filter("pending") is OrderStatus.PENDING
+    assert orders._normalize_order_status_filter("In Progress") is OrderStatus.IN_PROGRESS
+    assert orders._normalize_order_status_filter("in_progress") is OrderStatus.IN_PROGRESS
+    assert orders._normalize_order_status_filter("PACKED") is OrderStatus.PACKED
+
+
+def test_digits_only_strips_phone_formatting() -> None:
+    assert orders._digits_only("+94 77-123-4567") == "94771234567"
+
+
 def test_get_order_or_404_reloads_from_database_state(monkeypatch) -> None:
     actor = make_actor()
     expected_order = object()

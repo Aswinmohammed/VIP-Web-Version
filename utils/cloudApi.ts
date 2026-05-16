@@ -33,6 +33,7 @@ import {
 } from '../types';
 
 const API_BASE = '/api/v1';
+const API_TIMEOUT_MS = 30000;
 
 type LoginPayload = {
   tenantCode: string;
@@ -413,9 +414,38 @@ function jsonHeaders(token?: string | null): HeadersInit {
 }
 
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: init.signal || controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('The server took too long to respond. Please try again.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
   if (!response.ok) {
     const text = await response.text();
+    let payload: { detail?: unknown; errors?: unknown } | null = null;
+    try {
+      payload = text ? JSON.parse(text) as { detail?: unknown; errors?: unknown } : null;
+    } catch {
+      payload = null;
+    }
+    if (typeof payload?.detail === 'string') {
+      throw new Error(payload.detail);
+    }
+    if (Array.isArray(payload?.errors)) {
+      throw new Error(`Invalid request (${response.status}). Please check the entered data.`);
+    }
     throw new Error(text || `API request failed with ${response.status}`);
   }
   if (response.status === 204) {
@@ -1202,8 +1232,41 @@ export async function fetchCloudCustomers(token: string, branchId?: string): Pro
   return response.map(toCustomer);
 }
 
-export async function fetchCloudOrders(token: string, branchId?: string): Promise<Order[]> {
-  const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+export async function fetchCloudOrders(
+  token: string,
+  branchId?: string,
+  filters: {
+    statusFilter?: Order['status'];
+    search?: string;
+    fromDate?: string;
+    toDate?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<Order[]> {
+  const params = new URLSearchParams();
+  if (branchId) {
+    params.set('branch_id', branchId);
+  }
+  if (filters.statusFilter) {
+    params.set('status_filter', filters.statusFilter);
+  }
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim());
+  }
+  if (filters.fromDate) {
+    params.set('from_date', filters.fromDate);
+  }
+  if (filters.toDate) {
+    params.set('to_date', filters.toDate);
+  }
+  if (filters.limit) {
+    params.set('limit', String(filters.limit));
+  }
+  if (filters.offset) {
+    params.set('offset', String(filters.offset));
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiRequest<ApiOrder[]>(`/orders${query}`, { headers: jsonHeaders(token) });
   return response.map(toOrder);
 }

@@ -1789,12 +1789,12 @@ const App: React.FC = () => {
     return order ? getCloudInvoiceUrl(order, accessToken) : null;
   }, [orders, accessToken]);
 
-  if (isBooting || (accessToken && currentUser && !isInitialCloudLoadComplete)) {
+  if (isBooting) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#020617]">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-white mx-auto mb-6" />
-          <h2 className="text-sm font-black text-slate-500 uppercase tracking-[0.3em]">Connecting To Cloud...</h2>
+          <h2 className="text-sm font-black text-slate-500 uppercase tracking-[0.3em]">Starting VIP Tailors...</h2>
         </div>
       </div>
     );

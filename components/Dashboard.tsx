@@ -68,8 +68,9 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   };
 
   if (!context) return <div>Loading...</div>;
-  const { customers, orders, inventory, materialSales, expenses, employees, settings, currentBranch, isAllBranchesScope, getBranchName } = context;
+  const { customers, orders, inventory, materialSales, expenses, employees, settings, currentBranch, isAllBranchesScope, getBranchName, isPageLoading } = context;
   const branchScopeLabel = isAllBranchesScope ? 'All Branches' : currentBranch?.name || 'Branch Overview';
+  const isInitialDashboardLoading = isPageLoading && customers.length === 0 && orders.length === 0 && inventory.length === 0;
 
   const todayStr = new Date().toISOString().split('T')[0];
   const normalizePaymentMethod = (method?: string) => {
@@ -495,6 +496,17 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
       </div>
 
       <AdminFilterBar />
+
+      {isInitialDashboardLoading && (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="h-32 animate-pulse rounded-xl border border-slate-100 bg-white p-6 shadow-sm">
+              <div className="h-4 w-28 rounded bg-slate-100" />
+              <div className="mt-6 h-8 w-20 rounded bg-slate-200" />
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total Customers" value={customers.length} icon={Users} color="bg-blue-600" onClick={() => navigate('Customers')} />
