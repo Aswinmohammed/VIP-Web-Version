@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
@@ -147,3 +150,51 @@ def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+
+
+@router.post("/import-json")
+async def import_json(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a legacy JSON backup file and import all data into the database."""
+    try:
+        contents = await file.read()
+        data = json.loads(contents)
+
+        # Import inline using the same logic as migrate_legacy_json.py
+        import sys
+        sys.path.insert(0, "/app")
+        from collections import defaultdict
+        import migrate_legacy_json as mig
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from backend.app.database import engine as db_engine
+        from backend.app.core.config import get_settings
+
+        stats = defaultdict(lambda: {"created": 0, "updated": 0})
+        SessionLocal = sessionmaker(bind=db_engine, autoflush=False, autocommit=False, expire_on_commit=False, class_=Session)
+
+        with SessionLocal.begin() as session:
+            tenant = mig.get_or_create_tenant(session, "vip", "VIP Tailors", stats)
+            branch_codes = mig.collect_branch_codes(data, "KLM")
+            branches = {}
+            for branch_code in sorted(branch_codes):
+                branch_name = "KALMUNAI" if branch_code == "KLM" else mig.normalize_branch_name(branch_code)
+                branches[branch_code] = mig.get_or_create_branch(session, tenant, branch_code, branch_name, stats)
+            # Mark production hub
+            for branch in branches.values():
+                if branch.code == "KLM":
+                    branch.is_production_hub = True
+
+            customers = mig.import_customers(session, tenant, data, branches, "KLM", stats)
+            inventory_map = mig.import_inventory(session, tenant, data, branches, "KLM", stats)
+            mig.import_expenses(session, tenant, data, branches, "KLM", stats)
+            mig.import_employees(session, tenant, data, branches, "KLM", stats)
+            mig.import_suppliers(session, tenant, data, branches, "KLM", stats)
+            mig.import_orders(session, tenant, data, branches, customers, "KLM", stats)
+            mig.import_material_sales(session, tenant, data, branches, inventory_map, "KLM", stats)
+
+        summary = {k: v for k, v in stats.items()}
+        return {"status": "success", "summary": summary}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "detail": str(e), "trace": traceback.format_exc()}
