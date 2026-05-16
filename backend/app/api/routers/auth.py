@@ -97,7 +97,7 @@ def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
                 text("UPDATE branches SET tenant_id = :tid WHERE tenant_id <> :tid"),
                 {"tid": my_tenant_id}
             )
-            # 2. Fix Kalmunai
+            # 2. Fix Kalmunai as production hub
             connection.execute(
                 text("UPDATE branches SET is_production_hub = TRUE WHERE name ILIKE '%Kalmunai%'")
             )
@@ -109,6 +109,24 @@ def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
                         text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id <> :tid"),
                         {"tid": my_tenant_id}
                     )
-        return {"status": "success", "message": f"All data moved to your tenant: {my_tenant_id}"}
+            # 4. Also fix users table
+            connection.execute(
+                text("UPDATE users SET tenant_id = :tid WHERE tenant_id <> :tid"),
+                {"tid": my_tenant_id}
+            )
+
+        # Gather diagnostics
+        branches = db.execute(text("SELECT id, name, is_production_hub FROM branches WHERE tenant_id = :tid"), {"tid": my_tenant_id}).fetchall()
+        users = db.execute(text("SELECT id, username, role, branch_id FROM users WHERE tenant_id = :tid"), {"tid": my_tenant_id}).fetchall()
+        order_count = db.scalar(text("SELECT count(*) FROM orders WHERE tenant_id = :tid"), {"tid": my_tenant_id})
+        
+        return {
+            "status": "success",
+            "tenant_id": str(my_tenant_id),
+            "order_count": order_count,
+            "branches": [{"id": str(b[0]), "name": b[1], "is_production_hub": b[2]} for b in branches],
+            "users": [{"id": str(u[0]), "username": u[1], "role": u[2], "branch_id": str(u[3]) if u[3] else None} for u in users],
+        }
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+
