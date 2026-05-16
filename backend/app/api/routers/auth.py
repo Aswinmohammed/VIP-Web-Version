@@ -60,6 +60,19 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) 
     )
 
 
+@router.get("/debug-orders")
+def debug_orders(db: Session = Depends(get_db)):
+    """Count all orders in the entire database."""
+    try:
+        total_orders = db.scalar(text("SELECT count(*) FROM orders"))
+        tenant_counts = db.execute(text("SELECT tenant_id, count(*) FROM orders GROUP BY tenant_id")).fetchall()
+        return {
+            "total_orders": total_orders,
+            "tenant_counts": [{"tenant_id": str(t[0]), "count": t[1]} for t in tenant_counts]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.get("/fix-tenant")
 def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
     """Force moves all branches, orders, and customers to the specified tenant."""
