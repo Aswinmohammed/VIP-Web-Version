@@ -14,6 +14,7 @@ RUN pip install -r backend/requirements.txt
 COPY backend backend
 COPY bootstrap_master_admin.py ./
 COPY migrate_legacy_json.py ./
+COPY Tailor_Backup_2026-05-09.json ./
 
 EXPOSE 8000
 
