@@ -602,7 +602,8 @@ const App: React.FC = () => {
     const selectedBranch = resolvedBranchId !== 'all'
       ? loadedBranches.find((branch) => branch.id === resolvedBranchId) || null
       : null;
-    const hasProductionAccess = Boolean(selectedBranch?.isProductionHub);
+    const userPrimaryBranch = loadedBranches.find(b => b.id === actor.branchId);
+    const hasProductionAccess = Boolean(userPrimaryBranch?.isProductionHub);
     const branchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
     const orderDataBranchFilter = actor.role === 'master_admin'
       ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
