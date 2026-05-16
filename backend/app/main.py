@@ -74,8 +74,15 @@ def ensure_tenant_and_branch_consistency() -> None:
 
     try:
         with engine.begin() as connection:
-            # 1. Get the primary tenant ID from the first user (usually the master admin)
-            primary_tenant_id = connection.execute(text("SELECT tenant_id FROM users LIMIT 1")).scalar()
+            # 1. Get the primary tenant ID from the master admin user
+            primary_tenant_id = connection.execute(
+                text("SELECT tenant_id FROM users WHERE role = 'master_admin' ORDER BY created_at ASC LIMIT 1")
+            ).scalar()
+            
+            # Fallback if no master admin found
+            if not primary_tenant_id:
+                primary_tenant_id = connection.execute(text("SELECT tenant_id FROM users LIMIT 1")).scalar()
+
             if not primary_tenant_id:
                 return
 

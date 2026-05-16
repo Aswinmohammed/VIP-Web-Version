@@ -590,8 +590,11 @@ const App: React.FC = () => {
       };
     }
 
+    const userPrimaryBranch = loadedBranches.find(b => b.id === actor.branchId);
+    const hasProductionAccess = Boolean(userPrimaryBranch?.isProductionHub);
+
     let resolvedBranchId =
-      actor.role === 'branch_admin'
+      actor.role === 'branch_admin' && !hasProductionAccess
         ? actor.branchId || loadedBranches[0]?.id || ''
         : activeBranchIdRef.current || 'all';
 
@@ -602,16 +605,14 @@ const App: React.FC = () => {
     const selectedBranch = resolvedBranchId !== 'all'
       ? loadedBranches.find((branch) => branch.id === resolvedBranchId) || null
       : null;
-    const userPrimaryBranch = loadedBranches.find(b => b.id === actor.branchId);
-    const hasProductionAccess = Boolean(userPrimaryBranch?.isProductionHub);
     const branchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
-    const orderDataBranchFilter = actor.role === 'master_admin'
+    const orderDataBranchFilter = (actor.role === 'master_admin' || hasProductionAccess)
       ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
-      : (hasProductionAccess ? undefined : resolvedBranchId);
+      : resolvedBranchId;
 
-    const customerDataBranchFilter = actor.role === 'master_admin'
+    const customerDataBranchFilter = (actor.role === 'master_admin' || hasProductionAccess)
       ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
-      : (hasProductionAccess ? undefined : resolvedBranchId);
+      : resolvedBranchId;
 
     return {
       resolvedBranchId,
