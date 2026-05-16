@@ -10,10 +10,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
-from backend.app.database import engine
+from backend.app.database import engine, get_db
 from backend.app.models import Base, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
 from backend.app.services.files import save_json_backup, save_pdf_export
 from sqlalchemy import event
