@@ -61,10 +61,16 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) 
 
 
 @router.get("/fix-tenant")
-def fix_tenant(actor = Depends(get_current_actor)):
-    """Force moves all branches, orders, and customers to the logged-in user's tenant."""
+def fix_tenant(db: Session = Depends(get_db)):
+    """Force moves all branches, orders, and customers to the master admin's tenant."""
     try:
-        my_tenant_id = actor.tenant_id
+        my_tenant_id = db.scalar(text("SELECT tenant_id FROM users WHERE role = 'master_admin' ORDER BY created_at ASC LIMIT 1"))
+        if not my_tenant_id:
+            my_tenant_id = db.scalar(text("SELECT tenant_id FROM users LIMIT 1"))
+            
+        if not my_tenant_id:
+            return {"status": "error", "detail": "No tenant found in the database."}
+            
         inspector = inspect(engine)
         
         with engine.begin() as connection:
