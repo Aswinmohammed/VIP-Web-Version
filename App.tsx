@@ -604,16 +604,13 @@ const App: React.FC = () => {
       : null;
     const hasProductionAccess = Boolean(selectedBranch?.isProductionHub);
     const branchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
-    const orderDataBranchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all'
-      ? undefined
-      : hasProductionAccess
-        ? undefined
-        : resolvedBranchId;
-    const customerDataBranchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all'
-      ? undefined
-      : hasProductionAccess
-        ? undefined
-        : resolvedBranchId;
+    const orderDataBranchFilter = actor.role === 'master_admin'
+      ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
+      : (hasProductionAccess ? undefined : resolvedBranchId);
+
+    const customerDataBranchFilter = actor.role === 'master_admin'
+      ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
+      : (hasProductionAccess ? undefined : resolvedBranchId);
 
     return {
       resolvedBranchId,

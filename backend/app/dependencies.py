@@ -49,6 +49,12 @@ def get_current_actor(token: str = Depends(oauth2_scheme), db: Session = Depends
     if not user:
         raise unauthorized
 
+    is_hub = False
+    if user.branch_id:
+        branch = db.get(Branch, user.branch_id)
+        if branch:
+            is_hub = branch.is_production_hub
+
     actor = AuthenticatedActor(
         id=user.id,
         tenant_id=user.tenant_id,
@@ -56,7 +62,13 @@ def get_current_actor(token: str = Depends(oauth2_scheme), db: Session = Depends
         role=user.role,
         username=user.username,
     )
-    set_rls_context(db, str(actor.tenant_id), actor.role.value, str(actor.branch_id) if actor.branch_id else None)
+    set_rls_context(
+        db,
+        str(actor.tenant_id),
+        actor.role.value,
+        str(actor.branch_id) if actor.branch_id else None,
+        is_production_hub=is_hub,
+    )
     return actor
 
 

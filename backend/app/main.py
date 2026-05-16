@@ -652,12 +652,79 @@ def normalize_supplier_enum_data() -> None:
         print(f"[startup] ⚠️  Supplier payment method normalization warning: {e}")
 
 
+def ensure_master_admin_rls_visibility() -> None:
+    """Ensure master admin and production hubs can see rows hidden by strict branch RLS.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(engine)
+    branch_scoped_tables = [
+        "customers",
+        "orders",
+        "order_items",
+        "measurement_sets",
+        "measurement_values",
+        "payments",
+        "inventory_items",
+        "expenses",
+        "material_sales",
+        "material_sale_items",
+        "employees",
+        "employee_work_logs",
+        "employee_salary_payments",
+        "suppliers",
+        "supplier_purchases",
+        "supplier_payments",
+    ]
+
+    try:
+        with engine.begin() as connection:
+            for table_name in branch_scoped_tables:
+                if not _table_exists(inspector, table_name):
+                    continue
+
+                policy_name = f"tenant_branch_isolation_{table_name}"
+                connection.execute(text(f"DROP POLICY IF EXISTS {policy_name} ON {table_name}"))
+                connection.execute(
+                    text(
+                        f"""
+                        CREATE POLICY {policy_name} ON {table_name}
+                            USING (
+                                NULLIF(current_setting('app.current_role', true), '') = 'master_admin'
+                                OR (
+                                    tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '')
+                                    AND (
+                                        NULLIF(current_setting('app.is_production_hub', true), '') = 'true'
+                                        OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')
+                                    )
+                                )
+                            )
+                            WITH CHECK (
+                                NULLIF(current_setting('app.current_role', true), '') = 'master_admin'
+                                OR (
+                                    tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '')
+                                    AND (
+                                        NULLIF(current_setting('app.is_production_hub', true), '') = 'true'
+                                        OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')
+                                    )
+                                )
+                            )
+                        """
+                    )
+                )
+        print("[startup] Master admin RLS visibility policies ensured.")
+    except Exception as e:
+        print(f"[startup] Master admin RLS visibility policy warning: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
         Base.metadata.create_all(bind=engine)
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
+    ensure_master_admin_rls_visibility()
     normalize_order_status_data()
     normalize_user_role_data()
     normalize_employee_type_data()
