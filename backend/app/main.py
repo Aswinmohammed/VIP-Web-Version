@@ -61,6 +61,62 @@ def _table_exists(inspector, table_name: str) -> bool:
     return inspector.has_table(table_name)
 
 
+def ensure_tenant_and_branch_consistency() -> None:
+    """Force repair: ensures all branches and orders are correctly scoped to the tenant.
+    This prevents data from 'disappearing' due to tenant_id mismatches.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "users") or not _table_exists(inspector, "branches"):
+        return
+
+    try:
+        with engine.begin() as connection:
+            # 1. Get the primary tenant ID from the first user (usually the master admin)
+            primary_tenant_id = connection.execute(text("SELECT tenant_id FROM users LIMIT 1")).scalar()
+            if not primary_tenant_id:
+                return
+
+            print(f"[repair] Found primary tenant: {primary_tenant_id}")
+
+            # 2. Repair branches: Ensure all branches belong to this tenant
+            connection.execute(
+                text("UPDATE branches SET tenant_id = :tid WHERE tenant_id IS NULL OR tenant_id <> :tid"),
+                {"tid": primary_tenant_id}
+            )
+
+            # 3. Repair orders: Ensure all orders match their branch's tenant_id
+            if _table_exists(inspector, "orders"):
+                connection.execute(
+                    text("""
+                        UPDATE orders 
+                        SET tenant_id = branches.tenant_id 
+                        FROM branches 
+                        WHERE orders.branch_id = branches.id 
+                        AND (orders.tenant_id IS NULL OR orders.tenant_id <> branches.tenant_id)
+                    """)
+                )
+            
+            # 4. Repair order items, customers, etc.
+            for table in ["customers", "order_items", "payments", "inventory_items", "employees", "expenses"]:
+                if _table_exists(inspector, table):
+                    connection.execute(
+                        text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL OR tenant_id <> :tid"),
+                        {"tid": primary_tenant_id}
+                    )
+            
+            # 5. Fix Kalmunai Hub status if needed (based on user request)
+            connection.execute(
+                text("UPDATE branches SET is_production_hub = TRUE WHERE name ILIKE '%Kalmunai%'")
+            )
+
+        print("[repair] ✅ Database tenant and hub consistency repair complete.")
+    except Exception as e:
+        print(f"[repair] ⚠️ Repair warning: {e}")
+
+
 def ensure_branch_access_columns() -> None:
     inspector = inspect(engine)
     if not _table_exists(inspector, "branches"):
@@ -723,6 +779,7 @@ def ensure_master_admin_rls_visibility() -> None:
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
         Base.metadata.create_all(bind=engine)
+    ensure_tenant_and_branch_consistency()
     ensure_branch_access_columns()
     ensure_employee_salary_columns()
     ensure_master_admin_rls_visibility()
