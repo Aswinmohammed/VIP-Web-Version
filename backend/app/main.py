@@ -808,6 +808,35 @@ async def unhandled_exception_handler(_: Request, exc: Exception):
     )
 
 
+@app.get("/api/debug/rls")
+def debug_rls(db: Session = Depends(get_db)):
+    """Diagnostic endpoint to check RLS session variables."""
+    try:
+        tenant_id = db.scalar(text("SELECT current_setting('app.current_tenant_id', true)"))
+        role = db.scalar(text("SELECT current_setting('app.current_role', true)"))
+        branch_id = db.scalar(text("SELECT current_setting('app.current_branch_id', true)"))
+        is_hub = db.scalar(text("SELECT current_setting('app.is_production_hub', true)"))
+        
+        # Also check the actual branch record
+        branch_info = None
+        if branch_id:
+            branch_info = db.execute(text("SELECT id, name, is_production_hub FROM branches WHERE id::text = :bid"), {"bid": branch_id}).fetchone()
+            if branch_info:
+                branch_info = {"id": str(branch_info[0]), "name": branch_info[1], "is_production_hub": branch_info[2]}
+
+        return {
+            "session": {
+                "tenant_id": tenant_id,
+                "role": role,
+                "branch_id": branch_id,
+                "is_production_hub": is_hub
+            },
+            "branch_record": branch_info
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}
