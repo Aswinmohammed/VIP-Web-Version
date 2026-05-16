@@ -115,6 +115,18 @@ def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
             # Fix users
             connection.execute(text("UPDATE users SET tenant_id = :tid"), {"tid": my_tenant_id})
 
+            # Fix orders whose branch_id points to a non-existent branch → assign to production hub
+            connection.execute(text("""
+                UPDATE orders
+                SET branch_id = (
+                    SELECT id FROM branches
+                    WHERE tenant_id = :tid AND is_production_hub = TRUE
+                    LIMIT 1
+                )
+                WHERE branch_id NOT IN (SELECT id FROM branches WHERE tenant_id = :tid)
+            """), {"tid": my_tenant_id})
+
+
         # Gather diagnostics
         global_count = db.scalar(text("SELECT count(*) FROM orders"))
         tenant_count = db.scalar(text("SELECT count(*) FROM orders WHERE tenant_id = :tid"), {"tid": my_tenant_id})
