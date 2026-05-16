@@ -901,36 +901,6 @@ def debug_rls(db: Session = Depends(get_db)):
         return {"error": str(e)}
 
 
-@app.get("/api/debug/fix-tenant")
-def fix_tenant(actor = Depends(get_current_actor), db: Session = Depends(get_db)):
-    """Force moves all branches, orders, and customers to the logged-in user's tenant."""
-    try:
-        my_tenant_id = actor.tenant_id
-        inspector = inspect(engine)
-        
-        with engine.begin() as connection:
-            # 1. Move all branches to this tenant
-            connection.execute(
-                text("UPDATE branches SET tenant_id = :tid WHERE tenant_id <> :tid"),
-                {"tid": my_tenant_id}
-            )
-            # 2. Fix Kalmunai
-            connection.execute(
-                text("UPDATE branches SET is_production_hub = TRUE WHERE name ILIKE '%Kalmunai%'")
-            )
-            # 3. Move all other tables
-            tables_to_fix = ["orders", "customers", "order_items", "payments", "inventory_items", "employees", "expenses"]
-            for table in tables_to_fix:
-                if _table_exists(inspector, table):
-                    connection.execute(
-                        text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id <> :tid"),
-                        {"tid": my_tenant_id}
-                    )
-        return {"status": "success", "message": f"All data moved to your tenant: {my_tenant_id}"}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}

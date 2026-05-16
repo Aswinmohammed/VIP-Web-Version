@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.database import get_db
+from backend.app.database import get_db, engine
 from backend.app.models import Tenant, User
 from backend.app.schemas import LoginRequest, RefreshTokenRequest, TokenResponse, TokenUser
 from backend.app.security import JWTError, create_access_token, create_refresh_token, decode_token, validate_token_type, verify_password
-
+from backend.app.dependencies import get_current_actor
+from sqlalchemy import text, inspect
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,3 +58,33 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) 
         refresh_token=create_refresh_token(user),
         user=TokenUser.model_validate(user),
     )
+
+
+@router.get("/fix-tenant")
+def fix_tenant(actor = Depends(get_current_actor)):
+    """Force moves all branches, orders, and customers to the logged-in user's tenant."""
+    try:
+        my_tenant_id = actor.tenant_id
+        inspector = inspect(engine)
+        
+        with engine.begin() as connection:
+            # 1. Move all branches to this tenant
+            connection.execute(
+                text("UPDATE branches SET tenant_id = :tid WHERE tenant_id <> :tid"),
+                {"tid": my_tenant_id}
+            )
+            # 2. Fix Kalmunai
+            connection.execute(
+                text("UPDATE branches SET is_production_hub = TRUE WHERE name ILIKE '%Kalmunai%'")
+            )
+            # 3. Move all other tables
+            tables_to_fix = ["orders", "customers", "order_items", "payments", "inventory_items", "employees", "expenses"]
+            for table in tables_to_fix:
+                if inspector.has_table(table):
+                    connection.execute(
+                        text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id <> :tid"),
+                        {"tid": my_tenant_id}
+                    )
+        return {"status": "success", "message": f"All data moved to your tenant: {my_tenant_id}"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
