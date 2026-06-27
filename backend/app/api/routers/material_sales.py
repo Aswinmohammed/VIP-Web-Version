@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, apply_branch_scope, ensure_branch_in_tenant, get_current_actor, resolve_branch_scope
-from backend.app.models import MaterialSale, MaterialSaleItem
+from backend.app.models import InventoryItem, MaterialSale, MaterialSaleItem
 from backend.app.schemas import MaterialSaleCreate, MaterialSaleRead
 
 
@@ -25,6 +26,50 @@ def _get_material_sale_or_404(db: Session, actor: AuthenticatedActor, sale_id: u
     if not sale:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material sale not found")
     return sale
+
+
+def _deduct_inventory_stock(db: Session, actor: AuthenticatedActor, items: list) -> None:
+    """Deduct stock from inventory for each sale item. Raises 400 if insufficient stock."""
+    from datetime import datetime
+    for item_payload in items:
+        if not item_payload.inventory_item_id:
+            continue
+        inv_item = db.scalar(
+            apply_branch_scope(
+                select(InventoryItem).where(InventoryItem.id == item_payload.inventory_item_id),
+                InventoryItem,
+                actor,
+            ).with_for_update()
+        )
+        if inv_item is None:
+            continue
+        new_qty = inv_item.quantity - item_payload.quantity
+        if new_qty < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock for '{inv_item.name}'. Available: {inv_item.quantity}, requested: {item_payload.quantity}",
+            )
+        inv_item.quantity = new_qty
+        inv_item.last_updated = datetime.utcnow()
+
+
+def _restore_inventory_stock(db: Session, actor: AuthenticatedActor, sale_items: list) -> None:
+    """Restore inventory stock when a sale is deleted."""
+    from datetime import datetime
+    for item in sale_items:
+        if not item.inventory_item_id:
+            continue
+        inv_item = db.scalar(
+            apply_branch_scope(
+                select(InventoryItem).where(InventoryItem.id == item.inventory_item_id),
+                InventoryItem,
+                actor,
+            ).with_for_update()
+        )
+        if inv_item is None:
+            continue
+        inv_item.quantity = inv_item.quantity + item.quantity
+        inv_item.last_updated = datetime.utcnow()
 
 
 def _replace_material_sale_items(db: Session, actor: AuthenticatedActor, sale: MaterialSale, payload: MaterialSaleCreate) -> None:
@@ -78,6 +123,9 @@ def create_material_sale(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="branch_id is required")
     ensure_branch_in_tenant(db, actor.tenant_id, scoped_branch_id)
 
+    # Validate and deduct inventory stock before creating the sale
+    _deduct_inventory_stock(db, actor, payload.items)
+
     sale = MaterialSale(
         tenant_id=actor.tenant_id,
         branch_id=scoped_branch_id,
@@ -129,5 +177,7 @@ def delete_material_sale(
     db: Session = Depends(get_db),
 ) -> None:
     sale = _get_material_sale_or_404(db, actor, sale_id)
+    # Restore inventory stock when a sale is deleted
+    _restore_inventory_stock(db, actor, list(sale.items))
     db.delete(sale)
     db.commit()

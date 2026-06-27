@@ -12,6 +12,10 @@ dist
 dist-ssr
 .env
 .env.*
+!.env.example
+!.env.development.example
+!.env.staging.example
+!.env.production.example
 backend/.env
 backend/.env.*
 .venv/
@@ -42,3 +46,5 @@ data/tailor_shop.db
 *.njsproj
 *.sln
 *.sw?
+database/backups/*
+!database/backups/.gitkeep

@@ -31,6 +31,8 @@ def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
 @router.get("", response_model=list[CustomerRead])
 def list_customers(
     branch_id: uuid.UUID | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[Customer]:
@@ -41,6 +43,10 @@ def list_customers(
             stmt = stmt.where(Customer.branch_id == branch_id)
     else:
         stmt = apply_branch_scope(stmt, Customer, actor, branch_id)
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return list(db.scalars(stmt))
 
 

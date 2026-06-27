@@ -258,6 +258,7 @@ class InventoryItemBase(BaseModel):
     mrp: Decimal = Field(default=Decimal("0.00"), ge=0)
     wholesale_price: Decimal = Field(default=Decimal("0.00"), ge=0)
     last_updated: datetime | None = None
+    is_active: bool = True
 
 
 class InventoryItemCreate(InventoryItemBase):
@@ -278,6 +279,7 @@ class InventoryItemRead(ORMModel):
     mrp: Decimal
     wholesale_price: Decimal
     last_updated: datetime | None
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 

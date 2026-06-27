@@ -17,3 +17,13 @@ backend/.env.*
 tailor_db_import_normalized.json
 build.log
 
+Tailor_Backup_*.json
+*Backup*.json
+*.diff
+patch.diff
+*_original.tsx
+orderform_diff_output.txt
+ssh-ed25519*
+docs/
+database/backups/
+.github/

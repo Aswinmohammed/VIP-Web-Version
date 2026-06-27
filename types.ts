@@ -204,7 +204,7 @@ export interface Order {
   customerPhone?: string;
   orderDate: string;
   dueDate: string;
-  status: 'Pending' | 'Hold' | 'In Progress' | 'Completed' | 'Due' | 'Delivered' | 'Packed';
+  status: 'Pending' | 'Hold' | 'In Progress' | 'Completed' | 'Due' | 'Delivered' | 'Packed' | 'Cancelled';
   items: OrderItem[];
   discount: number;
   advance: number;
@@ -229,6 +229,7 @@ export interface InventoryItem {
   mrp: number;
   wholesalePrice: number;
   lastUpdated: string;
+  isActive?: boolean;
 }
 
 export interface Expense {

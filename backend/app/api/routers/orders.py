@@ -4,7 +4,9 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import SessionLocal, get_db
@@ -15,7 +17,7 @@ from backend.app.dependencies import (
     get_current_actor,
     resolve_branch_scope,
 )
-from backend.app.models import Branch, Customer, MeasurementSet, MeasurementValue, Order, OrderItem, OrderStatus, Payment
+from backend.app.models import Branch, Customer, InventoryItem, MeasurementSet, MeasurementValue, Order, OrderItem, OrderStatus, Payment
 from backend.app.schemas import OrderCreate, OrderRead, OrderStatusUpdate, PaymentInput, PaymentRead, ProductionNotificationRead
 from backend.app.services.pdf import render_invoice_pdf
 from backend.app.services.sms import (
@@ -289,6 +291,29 @@ def _create_measurement_snapshot(
         )
 
 
+def _adjust_inventory_for_order_items(db: Session, actor: AuthenticatedActor, items: list[OrderItem], is_restore: bool = False) -> None:
+    from decimal import Decimal
+    for item in items:
+        if item.inventory_item_id:
+            inventory_item = db.scalar(
+                select(InventoryItem).where(
+                    InventoryItem.id == item.inventory_item_id,
+                    InventoryItem.tenant_id == actor.tenant_id
+                ).with_for_update()
+            )
+            if inventory_item:
+                amount_to_adjust = Decimal(str(item.cloth_size or 1)) * Decimal(str(item.quantity))
+                if is_restore:
+                    inventory_item.quantity += amount_to_adjust
+                else:
+                    new_qty = inventory_item.quantity - amount_to_adjust
+                    if new_qty < 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Insufficient stock for '{inventory_item.name}'. Available: {inventory_item.quantity}, requested: {amount_to_adjust}",
+                        )
+                    inventory_item.quantity = new_qty
+
 def _replace_order_payload(db: Session, actor: AuthenticatedActor, order: Order, payload: OrderCreate) -> None:
     scoped_branch_id = _resolve_order_branch_id(db, actor, payload.branch_id or order.branch_id)
     if scoped_branch_id is None:
@@ -502,6 +527,26 @@ def create_order(
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found in accessible branch")
 
+    # Idempotency guard: if an order with this legacy_id already exists for this tenant, return it
+    if payload.order_number:
+        existing_order = db.scalar(
+            _apply_order_scope(
+                select(Order)
+                .options(
+                    selectinload(Order.items),
+                    selectinload(Order.payments),
+                    selectinload(Order.customer),
+                    selectinload(Order.branch_rel),
+                    selectinload(Order.measurement_sets).selectinload(MeasurementSet.values),
+                )
+                .where(Order.order_number == payload.order_number),
+                db,
+                actor,
+            )
+        )
+        if existing_order is not None:
+            return _serialize_order(existing_order)
+
     order = Order(
         tenant_id=actor.tenant_id,
         branch_id=scoped_branch_id,
@@ -518,8 +563,33 @@ def create_order(
         call_history=payload.call_history,
         bag_count=payload.bag_count,
     )
-    db.add(order)
-    db.flush()
+    
+    try:
+        db.add(order)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        # If we hit an integrity error on order_number + tenant_id, just return the existing one.
+        if payload.order_number:
+            existing_order = db.scalar(
+                _apply_order_scope(
+                    select(Order)
+                    .options(
+                        selectinload(Order.items),
+                        selectinload(Order.payments),
+                        selectinload(Order.customer),
+                        selectinload(Order.branch_rel),
+                        selectinload(Order.measurement_sets).selectinload(MeasurementSet.values),
+                    )
+                    .where(Order.order_number == payload.order_number),
+                    db,
+                    actor,
+                )
+            )
+            if existing_order is not None:
+                return _serialize_order(existing_order)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Order already exists")
+
     created_order_id = order.id
 
     for item_payload in payload.items:
@@ -546,6 +616,10 @@ def create_order(
         db.flush()
         _create_measurement_snapshot(db, actor, payload.customer_id, scoped_branch_id, order, order_item, item_payload.measurements)
 
+    # Deduct inventory stock if order is not immediately Cancelled
+    if payload.status != OrderStatus.CANCELLED:
+        _adjust_inventory_for_order_items(db, actor, list(order.items), is_restore=False)
+
     for payment_payload in payload.payments:
         payment = Payment(
             tenant_id=actor.tenant_id,
@@ -564,14 +638,16 @@ def create_order(
     loaded_customer = loaded_order.customer
     if loaded_customer is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Customer relationship missing after order creation")
-    queued_logs: list[object | None] = [queue_order_confirmation_sms(db, loaded_order, loaded_customer)]
-    if is_order_ready_status(loaded_order.status):
-        queued_logs.append(queue_order_ready_sms(db, loaded_order, loaded_customer))
-    if loaded_order.status == OrderStatus.DUE:
-        queued_logs.append(queue_due_reminder_sms(db, loaded_order, loaded_customer, reference_date=loaded_order.due_date or loaded_order.order_date))
-    if loaded_order.status == OrderStatus.DELIVERED:
-        queued_logs.append(queue_order_delivered_sms(db, loaded_order, loaded_customer))
-    queued_logs.append(queue_thank_you_sms(db, loaded_order, loaded_customer))
+    queued_logs: list[object | None] = []
+    if loaded_order.status != OrderStatus.HOLD:
+        queued_logs.append(queue_order_confirmation_sms(db, loaded_order, loaded_customer))
+        if is_order_ready_status(loaded_order.status):
+            queued_logs.append(queue_order_ready_sms(db, loaded_order, loaded_customer))
+        if loaded_order.status == OrderStatus.DUE:
+            queued_logs.append(queue_due_reminder_sms(db, loaded_order, loaded_customer, reference_date=loaded_order.due_date or loaded_order.order_date))
+        if loaded_order.status == OrderStatus.DELIVERED:
+            queued_logs.append(queue_order_delivered_sms(db, loaded_order, loaded_customer))
+        queued_logs.append(queue_thank_you_sms(db, loaded_order, loaded_customer))
 
     db.commit()
     _schedule_immediate_sms_dispatch(background_tasks, queued_logs)
@@ -588,7 +664,18 @@ def update_order(
 ) -> dict:
     order = _get_order_or_404(db, actor, order_id)
     previous_status = order.status
+    old_items = list(order.items)
+    
+    # Restore stock for old items if order wasn't previously cancelled
+    if previous_status != OrderStatus.CANCELLED:
+        _adjust_inventory_for_order_items(db, actor, old_items, is_restore=True)
+
     _replace_order_payload(db, actor, order, payload)
+    
+    # Deduct stock for new items if order is not cancelled
+    if payload.status != OrderStatus.CANCELLED:
+        _adjust_inventory_for_order_items(db, actor, list(order.items), is_restore=False)
+        
     db.commit()
     loaded_order = _get_order_or_404(db, actor, order_id)
     queued_logs: list[object | None] = []
@@ -676,6 +763,8 @@ def delete_order(
     db: Session = Depends(get_db),
 ) -> None:
     order = _get_order_or_404(db, actor, order_id)
+    if order.status != OrderStatus.CANCELLED:
+        _adjust_inventory_for_order_items(db, actor, list(order.items), is_restore=True)
     db.delete(order)
     db.commit()
 

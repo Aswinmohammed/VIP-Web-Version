@@ -37,7 +37,11 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
         return phone;
     };
 
-    const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0);
+    const itemsTotal = order.items.reduce((sum, item) => {
+        const materialCost = (item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1);
+        const stitchCost = (item.stitchFee || 0) * (item.quantity || 1);
+        return sum + materialCost + stitchCost;
+    }, 0);
     const discount = order.discount || 0;
     const grandTotal = Math.max(0, itemsTotal - discount);
 
@@ -270,8 +274,8 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                         <div key={item.id} className="mb-2">
                             <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
                             <div className="flex justify-between text-xs">
-                                <span>{item.quantity} x {item.pricePerUnit.toFixed(2)}</span>
-                                <span className="bold">{(item.quantity * item.pricePerUnit).toFixed(2)}</span>
+                                <span>{item.quantity} x {(((item.clothSize || 0) * (item.pricePerUnit || 0)) + (item.stitchFee || 0)).toFixed(2)}</span>
+                                <span className="bold">{((((item.clothSize || 0) * (item.pricePerUnit || 0)) + (item.stitchFee || 0)) * (item.quantity || 1)).toFixed(2)}</span>
                             </div>
                         </div>
                     ))}

@@ -17,6 +17,7 @@ from backend.app.core.config import get_settings
 from backend.app.database import engine, get_db
 from backend.app.models import Base, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
 from backend.app.services.files import save_json_backup, save_pdf_export
+from backend.app.dependencies import AuthenticatedActor, get_current_actor
 from sqlalchemy import event
 
 
@@ -177,7 +178,7 @@ def ensure_employee_salary_columns() -> None:
 
 
 def ensure_order_status_support() -> None:
-    """Ensure the 'Hold' value exists in the order_status PostgreSQL enum.
+    """Ensure the 'Hold' and 'Cancelled' values exist in the order_status PostgreSQL enum.
 
     This is an idempotent migration that runs every startup.
     ALTER TYPE ... ADD VALUE must run outside a transaction in PostgreSQL.
@@ -221,6 +222,19 @@ def ensure_order_status_support() -> None:
                     print("[startup]    Run: ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Hold' BEFORE 'In Progress';")
             else:
                 print("[startup] ✅ 'Hold' already present in order_status enum.")
+
+            if "Cancelled" not in current_values:
+                print("[startup] Adding 'Cancelled' to order_status enum...")
+                connection.execute(
+                    text("ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'Cancelled'")
+                )
+                updated_values = _read_enum_values(connection)
+                if "Cancelled" in updated_values:
+                    print(f"[startup] ✅ 'Cancelled' added successfully.")
+                else:
+                    print(f"[startup] ⚠️  'Cancelled' was not added — may need manual migration.")
+            else:
+                print("[startup] ✅ 'Cancelled' already present in order_status enum.")
     except Exception as e:
         # Non-fatal: log the error but allow the app to start normally.
         # The Hold feature may not work, but login and all other features will.
@@ -282,6 +296,7 @@ def ensure_inventory_and_order_material_columns() -> None:
                 "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS item_code VARCHAR(120)",
                 "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS barcode_value VARCHAR(255)",
                 "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(12, 2) NOT NULL DEFAULT 0",
+                "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
                 "UPDATE inventory_items SET category = 'Material' WHERE category IS NULL OR TRIM(category) = ''",
             ]
         )
@@ -314,6 +329,15 @@ def ensure_inventory_and_order_material_columns() -> None:
             connection.execute(text(statement))
         for statement in order_item_statements:
             connection.execute(text(statement))
+
+    # Add is_active column to inventory_items if missing
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+    except Exception as e:
+        print(f"[startup] ⚠️  inventory_items.is_active column warning: {e}")
+
+    print("[startup] ✅ Inventory and order material columns ensured.")
 
 
 def normalize_order_status_data() -> None:
@@ -782,6 +806,31 @@ def ensure_master_admin_rls_visibility() -> None:
         print(f"[startup] Master admin RLS visibility policy warning: {e}")
 
 
+
+def ensure_order_constraints_and_indexes() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE orders ADD CONSTRAINT uq_orders_tenant_number UNIQUE (tenant_id, order_number)",
+        "CREATE INDEX IF NOT EXISTS idx_customers_tenant_branch_name ON customers (tenant_id, branch_id, name)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_tenant_branch_date ON orders (tenant_id, branch_id, order_date)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_tenant_status ON orders (tenant_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant_barcode ON inventory_items (tenant_id, barcode_value)",
+        "CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant_name ON inventory_items (tenant_id, name)",
+        "CREATE INDEX IF NOT EXISTS idx_material_sales_sale_date ON material_sales (sale_date)",
+        "CREATE INDEX IF NOT EXISTS idx_material_sale_items_inventory_id ON material_sale_items (inventory_item_id)",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            try:
+                connection.execute(text(statement))
+            except Exception as e:
+                # Catch already exists or other non-fatal errors
+                print(f"[startup] Constraint/Index statement warning: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
@@ -800,6 +849,7 @@ async def lifespan(_: FastAPI):
     ensure_order_status_support()
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()
+    ensure_order_constraints_and_indexes()
     yield
 
 
@@ -875,6 +925,8 @@ async def unhandled_exception_handler(_: Request, exc: Exception):
 @app.get("/api/debug/rls")
 def debug_rls(db: Session = Depends(get_db)):
     """Diagnostic endpoint to check RLS session variables."""
+    if settings.environment == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     try:
         tenant_id = db.scalar(text("SELECT current_setting('app.current_tenant_id', true)"))
         role = db.scalar(text("SELECT current_setting('app.current_role', true)"))
@@ -907,7 +959,10 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/save-pdf")
-def save_pdf(payload: SavePdfRequest) -> dict[str, str]:
+def save_pdf(
+    payload: SavePdfRequest,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+) -> dict[str, str]:
     try:
         file_path = save_pdf_export(payload.pdfData, payload.filename)
     except ValueError as exc:
@@ -918,7 +973,10 @@ def save_pdf(payload: SavePdfRequest) -> dict[str, str]:
 
 
 @app.post("/api/save-backup")
-def save_backup(payload: SaveBackupRequest) -> dict[str, str]:
+def save_backup(
+    payload: SaveBackupRequest,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+) -> dict[str, str]:
     try:
         file_path = save_json_backup(payload.data, payload.filename)
     except ValueError as exc:

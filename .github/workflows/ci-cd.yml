@@ -1,0 +1,104 @@
+name: VIP Tailors CI/CD
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vip_tailors_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vip_tailors_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      VIP_ENVIRONMENT: testing
+      VIP_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vip_tailors_test
+      VIP_JWT_SECRET_KEY: test-secret-at-least-32-characters
+      VIP_CREATE_TABLES_ON_STARTUP: "false"
+      VIP_CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      VITE_API_PROXY_TARGET: http://127.0.0.1:8000
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Validate Alembic migrations on empty database
+        run: alembic upgrade head
+
+      - name: Run backend tests
+        run: python -m pytest backend/tests
+
+  deploy-staging:
+    name: Deploy staging
+    if: github.ref == 'refs/heads/develop'
+    needs: test-build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger staging deployment webhook
+        env:
+          COOLIFY_STAGING_WEBHOOK_URL: ${{ secrets.COOLIFY_STAGING_WEBHOOK_URL }}
+        run: |
+          if [ -z "$COOLIFY_STAGING_WEBHOOK_URL" ]; then
+            echo "COOLIFY_STAGING_WEBHOOK_URL is not configured; skipping staging deploy."
+            exit 0
+          fi
+          curl --fail --request POST "$COOLIFY_STAGING_WEBHOOK_URL"
+
+  deploy-production:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main'
+    needs: test-build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Confirm production backup requirement
+        run: echo "Ensure the production database backup job completed before approving this environment."
+
+      - name: Trigger production deployment webhook
+        env:
+          COOLIFY_PRODUCTION_WEBHOOK_URL: ${{ secrets.COOLIFY_PRODUCTION_WEBHOOK_URL }}
+        run: |
+          if [ -z "$COOLIFY_PRODUCTION_WEBHOOK_URL" ]; then
+            echo "COOLIFY_PRODUCTION_WEBHOOK_URL is not configured; skipping production deploy."
+            exit 0
+          fi
+          curl --fail --request POST "$COOLIFY_PRODUCTION_WEBHOOK_URL"

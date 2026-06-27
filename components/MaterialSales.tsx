@@ -46,6 +46,8 @@ const MaterialSales: React.FC = () => {
     const [saleRows, setSaleRows] = useState<{ itemId: string; quantity: string; unitPrice: string }[]>([
         { itemId: '', quantity: '', unitPrice: '' }
     ]);
+    const [activeInventoryDropdownIndex, setActiveInventoryDropdownIndex] = useState<number | null>(null);
+    const [inventorySearchTerms, setInventorySearchTerms] = useState<Record<number, string>>({});
 
     const addRow = () => setSaleRows([...saleRows, { itemId: '', quantity: '', unitPrice: '' }]);
     const removeRow = (index: number) => setSaleRows(saleRows.filter((_, i) => i !== index));
@@ -58,11 +60,41 @@ const MaterialSales: React.FC = () => {
         if (field === 'itemId') {
             const selectedItem = inventory.find(i => i.id === value);
             if (selectedItem) {
-                // Now using mrp as the default selling price
-                newRows[index].unitPrice = (selectedItem.mrp || selectedItem.unitPrice).toString();
+                newRows[index].unitPrice = (selectedItem.wholesalePrice || selectedItem.mrp || selectedItem.unitPrice || 0).toString();
             }
         }
         setSaleRows(newRows);
+    };
+
+    const handleInventorySearch = (index: number, term: string) => {
+        setInventorySearchTerms(prev => ({ ...prev, [index]: term }));
+        setActiveInventoryDropdownIndex(index);
+    };
+
+    const selectInventoryItem = (index: number, invItem: import('../types').InventoryItem) => {
+        const newRows = [...saleRows];
+        newRows[index] = {
+            ...newRows[index],
+            itemId: invItem.id,
+            unitPrice: (invItem.wholesalePrice || invItem.mrp || invItem.unitPrice || 0).toString()
+        };
+        setSaleRows(newRows);
+        setActiveInventoryDropdownIndex(null);
+        setInventorySearchTerms(prev => ({ ...prev, [index]: '' }));
+    };
+
+    const handleBarcodeScan = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const code = e.currentTarget.value.trim().toUpperCase();
+            if (!code) return;
+            const matchedItem = inventory.find(i => i.barcodeValue?.toUpperCase() === code || i.itemCode?.toUpperCase() === code);
+            if (matchedItem) {
+                selectInventoryItem(index, matchedItem);
+            } else {
+                alert('Item not found in inventory');
+            }
+        }
     };
 
     const grandTotalBeforeDiscount = useMemo(() => {
@@ -306,26 +338,59 @@ const MaterialSales: React.FC = () => {
                             {/* Rows */}
                             {saleRows.map((row, index) => (
                                 <div key={index} className="grid grid-cols-12 gap-4 items-center animate-in slide-in-from-left-2 duration-200">
-                                    <div className="col-span-5">
-                                        <select
-                                            value={row.itemId}
-                                            onChange={e => updateRow(index, 'itemId', e.target.value)}
-                                            className="w-full border p-2 rounded-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                                        >
-                                            <option value="">Choose Material...</option>
-                                            {inventory.filter(item => {
-                                                const cat = item.category.toLowerCase();
-                                                const name = item.name.toLowerCase();
-                                                // Include items if category is Material/Cloth OR if it's a specific dress type OR if name has material keywords
-                                                const isMaterialType = ['material', 'cloth', 'fabric', 'piece', 'shirt', 'trouser', 'school shirt', 'school trouser', 'thobe', 'jubbah', 'kurta', 'coat', 'waistcoat'].some(c => cat.includes(c));
-                                                const hasMaterialKeyword = name.includes('material') || name.includes('cloth') || name.includes('fabric') || name.includes('piece');
-                                                return isMaterialType || hasMaterialKeyword;
-                                            }).map(item => (
-                                                <option key={item.id} value={item.id}>
-                                                    {item.name} ({item.quantity} available)
-                                                </option>
-                                            ))}
-                                        </select>
+                                    <div className="col-span-5 relative">
+                                        <div className="flex rounded-lg shadow-sm">
+                                            <input
+                                                type="text"
+                                                name="barcodeScan"
+                                                placeholder="Scan barcode..."
+                                                onKeyDown={e => handleBarcodeScan(index, e)}
+                                                className="block w-1/3 border p-2 rounded-l-lg text-xs bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none border-r-0"
+                                                title="Focus and scan barcode, press Enter"
+                                            />
+                                            <input
+                                                type="text"
+                                                name="clothName"
+                                                value={activeInventoryDropdownIndex === index ? (inventorySearchTerms[index] ?? '') : (inventory.find(i => i.id === row.itemId)?.name || '')}
+                                                onChange={e => {
+                                                    handleInventorySearch(index, e.target.value);
+                                                    if (!e.target.value) {
+                                                        updateRow(index, 'itemId', ''); // clear if empty
+                                                    }
+                                                }}
+                                                onFocus={() => handleInventorySearch(index, inventory.find(i => i.id === row.itemId)?.name || '')}
+                                                placeholder="Search material..."
+                                                className="block w-2/3 border p-2 rounded-r-lg text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                                autoComplete="off"
+                                            />
+                                        </div>
+                                        {activeInventoryDropdownIndex === index && (
+                                            <div className="absolute z-50 left-0 top-full mt-1 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
+                                                {inventory
+                                                    .filter(item => {
+                                                        const cat = item.category.toLowerCase();
+                                                        const name = item.name.toLowerCase();
+                                                        const isMaterialType = ['material', 'cloth', 'fabric', 'piece', 'shirt', 'trouser', 'school shirt', 'school trouser', 'thobe', 'jubbah', 'kurta', 'coat', 'waistcoat'].some(c => cat.includes(c));
+                                                        const hasMaterialKeyword = name.includes('material') || name.includes('cloth') || name.includes('fabric') || name.includes('piece');
+                                                        return (isMaterialType || hasMaterialKeyword) && item.isActive !== false;
+                                                    })
+                                                    .filter(inv => !inventorySearchTerms[index] || inv.name.toLowerCase().includes(inventorySearchTerms[index].toLowerCase()) || inv.itemCode?.toLowerCase().includes(inventorySearchTerms[index].toLowerCase()))
+                                                    .slice(0, 10)
+                                                    .map(inv => (
+                                                        <div
+                                                            key={inv.id}
+                                                            onClick={() => selectInventoryItem(index, inv)}
+                                                            className="px-3 py-2 cursor-pointer hover:bg-indigo-50 border-b border-gray-50 last:border-0"
+                                                        >
+                                                            <div className="text-sm font-bold text-gray-800">{inv.name} <span className="text-xs text-gray-500 ml-2">({inv.quantity} avail)</span></div>
+                                                            <div className="flex justify-between text-xs text-gray-500">
+                                                                <span>{inv.itemCode || 'No Code'}</span>
+                                                                <span className="font-bold text-indigo-600">Rs. {inv.wholesalePrice || inv.mrp || inv.unitPrice || 0}</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="col-span-2">
                                         <input

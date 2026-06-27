@@ -18,8 +18,8 @@ engine_options = {
 if database_url.drivername.startswith("postgresql"):
     engine_options.update(
         {
-            "pool_size": 10,
-            "max_overflow": 20,
+            "pool_size": 30,
+            "max_overflow": 50,
             "pool_recycle": 1800,
             "pool_timeout": 30,
         }

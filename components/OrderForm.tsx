@@ -2,7 +2,7 @@
 import React, { useState, useContext, useEffect, useMemo, useRef } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, OrderItem, Measurement, Page, DEFAULT_MEASUREMENTS, DressType, Payment, Customer } from '../types';
-import { PlusCircle, Trash2, Save, XCircle, Ruler, Calculator, FileText, Search, ChevronRight, ChevronDown, UserPlus, History, Clock } from 'lucide-react';
+import { PlusCircle, Trash2, Save, XCircle, Ruler, Calculator, FileText, Search, ChevronRight, ChevronDown, UserPlus, History, Clock, Scan, Scissors } from 'lucide-react';
 import CustomerForm from './CustomerForm';
 
 interface OrderFormProps {
@@ -75,7 +75,7 @@ function parseFlexibleNumber(value: string): number {
 
 const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const context = useContext(AppContext);
-  const { customers, orders, activeBranchId, currentUser, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope } = context!;
+  const { customers, orders, inventory, activeBranchId, currentUser, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope } = context!;
   const canManageProductionStatuses = isAllBranchesScope || currentBranch?.isProductionHub || canUseOrderAction('track_completion');
   const blockedStatusValues: Order['status'][] = ['In Progress', 'Completed', 'Packed'];
   const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
@@ -119,6 +119,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [activeDropdownIndex, setActiveDropdownIndex] = useState<number | null>(null);
+  const [activeInventoryDropdownIndex, setActiveInventoryDropdownIndex] = useState<number | null>(null);
+  const [inventorySearchTerms, setInventorySearchTerms] = useState<Record<number, string>>({});
+  const [scanSuccessIndex, setScanSuccessIndex] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [newPayment, setNewPayment] = useState<{ amount: string, date: string, method: 'Cash' | 'Card' | 'Bank Transfer' }>({
@@ -364,14 +367,58 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     const newItems = [...order.items];
     const item = newItems[index];
 
-    if (name === 'quantity' || name === 'clothSize' || name === 'pricePerUnit') {
-      // @ts-ignore
-      item[name] = parseFlexibleNumber(value);
-    } else if (name === 'clothName' || name === 'note') {
-      // @ts-ignore
-      item[name] = value;
+    newItems[index] = { ...newItems[index], [name]: value };
+
+    if (name === 'inventoryItemId') {
+      const selectedItem = inventory.find(i => i.id === value);
+      if (selectedItem) {
+        newItems[index].pricePerUnit = selectedItem.wholesalePrice || selectedItem.mrp || selectedItem.unitPrice || 0;
+      }
+    } else if (name === 'quantity' || name === 'clothSize' || name === 'pricePerUnit' || name === 'stitchFee') {
+        // @ts-ignore
+        newItems[index][name] = parseFlexibleNumber(value);
     }
     setOrder(prev => ({ ...prev, items: newItems }));
+  };
+
+  const handleInventorySearch = (index: number, term: string) => {
+    setInventorySearchTerms(prev => ({ ...prev, [index]: term }));
+    setActiveInventoryDropdownIndex(index);
+  };
+
+  const selectInventoryItem = (index: number, invItem: any) => {
+    const newItems = [...order.items];
+    newItems[index] = {
+      ...newItems[index],
+      inventoryItemId: invItem.id,
+      clothName: invItem.name,
+      pricePerUnit: invItem.wholesalePrice || invItem.mrp || invItem.unitPrice || 0
+    };
+    setOrder(prev => ({ ...prev, items: newItems }));
+    setActiveInventoryDropdownIndex(null);
+    setInventorySearchTerms(prev => ({ ...prev, [index]: '' }));
+  };
+
+  const handleBarcodeScan = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = e.currentTarget.value.trim().toUpperCase();
+      if (!code) return;
+      // Search by barcodeValue, itemCode (exact match, case-insensitive)
+      const matchedItem = inventory.find(i =>
+        i.barcodeValue?.toUpperCase() === code ||
+        i.itemCode?.toUpperCase() === code
+      );
+      if (matchedItem) {
+        selectInventoryItem(index, matchedItem);
+        // Clear the barcode field and flash success
+        e.currentTarget.value = '';
+        setScanSuccessIndex(index);
+        setTimeout(() => setScanSuccessIndex(null), 1500);
+      } else {
+        alert(`Item not found: "${code}". Check the item code or barcode value in Inventory.`);
+      }
+    }
   };
 
   const handleMeasurementChange = (itemIndex: number, measIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -647,13 +694,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     }
   };
 
+  // Correct business formula: ((clothSize × pricePerUnit) × quantity) + (stitchFee × quantity)
   const grandTotal = useMemo(() => {
-    return order.items.reduce((total, item) => total + (item.quantity * (item.pricePerUnit || 0)), 0);
+    return order.items.reduce(
+      (total, item) => {
+        const materialCost = (item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1);
+        return total + materialCost + ((item.stitchFee || 0) * (item.quantity || 1));
+      },
+      0
+    );
+  }, [order.items]);
+
+  const totalStitchFee = useMemo(() => {
+    return order.items.reduce((sum, item) => sum + ((item.stitchFee || 0) * (item.quantity || 1)), 0);
   }, [order.items]);
 
   const finalAmount = Math.max(0, grandTotal - (order.discount || 0));
+  const roundedFinalAmount = Math.round(finalAmount / 50) * 50;
   const totalPaid = (order.payments || []).reduce((sum, p) => sum + p.amount, 0);
-  const balance = finalAmount - totalPaid;
+  const balance = roundedFinalAmount - totalPaid;
 
   return (
     <div className="p-4 sm:p-6 bg-white rounded-lg shadow-md">
@@ -836,16 +895,88 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                     )}
                   </div>
 
-                  <div className="min-w-[220px] flex-1">
+                  {/* Material / Cloth Search + Barcode Scanner */}
+                  <div className="min-w-[240px] flex-1 relative inventory-dropdown">
                     <label className="mb-1 block text-xs font-medium text-gray-500">Cloth / Material</label>
-                    <input
-                      type="text"
-                      name="clothName"
-                      value={item.clothName || ''}
-                      onChange={e => handleItemChange(itemIndex, e)}
-                      className="block w-full rounded-md border border-gray-300 py-1.5 px-3 text-sm focus:border-primary-500 focus:ring-primary-500"
-                    />
+                    <div className="flex flex-col gap-1">
+                      {/* Barcode Scanner Row */}
+                      <div className="relative flex items-center">
+                        <span className="absolute left-2 text-gray-400 pointer-events-none">
+                          <Scan size={13} />
+                        </span>
+                        <input
+                          type="text"
+                          name="barcodeScan"
+                          placeholder="Scan barcode & press Enter..."
+                          onKeyDown={e => handleBarcodeScan(itemIndex, e)}
+                          className={`block w-full rounded-md border py-1 pl-7 pr-3 text-xs transition-all duration-300 focus:outline-none focus:ring-1 ${
+                            scanSuccessIndex === itemIndex
+                              ? 'border-green-500 bg-green-50 ring-green-400 text-green-700 font-bold'
+                              : 'border-gray-300 bg-gray-50 focus:border-indigo-400 focus:ring-indigo-300'
+                          }`}
+                          title="Focus here, then scan barcode with scanner. Press Enter to confirm."
+                        />
+                        {scanSuccessIndex === itemIndex && (
+                          <span className="absolute right-2 text-green-600 text-xs font-bold animate-pulse">✓ Found!</span>
+                        )}
+                      </div>
+                      {/* Text Search Row */}
+                      <div className="relative">
+                        <span className="absolute left-2 top-1.5 text-gray-400 pointer-events-none">
+                          <Search size={13} />
+                        </span>
+                        <input
+                          type="text"
+                          name="clothName"
+                          value={activeInventoryDropdownIndex === itemIndex ? (inventorySearchTerms[itemIndex] ?? '') : (item.clothName || '')}
+                          onChange={e => {
+                            handleItemChange(itemIndex, e);
+                            handleInventorySearch(itemIndex, e.target.value);
+                          }}
+                          onFocus={() => handleInventorySearch(itemIndex, item.clothName || '')}
+                          placeholder="Search by name or item code..."
+                          className="block w-full rounded-md border border-gray-300 py-1 pl-7 pr-3 text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                    {activeInventoryDropdownIndex === itemIndex && (
+                      <div className="absolute z-50 left-0 top-full mt-1 w-full max-h-52 overflow-y-auto bg-white border border-indigo-200 rounded-lg shadow-xl">
+                        {(() => {
+                          const searchTerm = (inventorySearchTerms[itemIndex] || '').toLowerCase().trim();
+                          const filtered = inventory
+                            .filter(inv => inv.isActive !== false)
+                            .filter(inv => !searchTerm ||
+                              inv.name.toLowerCase().includes(searchTerm) ||
+                              inv.itemCode?.toLowerCase().includes(searchTerm) ||
+                              inv.barcodeValue?.toLowerCase().includes(searchTerm)
+                            )
+                            .slice(0, 12);
+                          if (inventory.length === 0) return (
+                            <div className="px-3 py-4 text-center text-xs text-gray-500 italic">No inventory items available. Add items in the Inventory module.</div>
+                          );
+                          if (filtered.length === 0) return (
+                            <div className="px-3 py-4 text-center text-xs text-gray-500 italic">No match for "{searchTerm}"</div>
+                          );
+                          return filtered.map(inv => (
+                            <div
+                              key={inv.id}
+                              onClick={() => selectInventoryItem(itemIndex, inv)}
+                              className="px-3 py-2 cursor-pointer hover:bg-indigo-50 border-b border-gray-50 last:border-0 group"
+                            >
+                              <div className="text-sm font-bold text-gray-800 group-hover:text-indigo-700">{inv.name}</div>
+                              <div className="flex justify-between items-center text-xs text-gray-500 mt-0.5">
+                                <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{inv.itemCode || '—'}</span>
+                                <span>Stock: <span className={(inv.quantity || 0) > 0 ? "text-green-600 font-bold" : "text-red-500 font-bold"}>{inv.quantity || 0}</span></span>
+                                <span className="font-bold text-indigo-600">Rs. {inv.wholesalePrice || inv.mrp || inv.unitPrice || 0}</span>
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
                   </div>
+
                   <div className="w-24">
                     <label className="mb-1 block text-xs font-medium text-gray-500">Cloth Size</label>
                     <input
@@ -869,9 +1000,28 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                       <input type="number" name="pricePerUnit" value={item.pricePerUnit || 0} onChange={e => handleItemChange(itemIndex, e)} min="0" step="0.01" className="block w-full rounded-md border border-gray-300 py-1.5 px-3 pl-9 text-sm font-bold text-slate-700 focus:border-primary-500 focus:ring-primary-500" />
                     </div>
                   </div>
-                  <div className="w-24 text-right">
+                  {/* Stitching Fee field */}
+                  <div className="w-32">
+                    <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                      <Scissors size={11} className="text-purple-400" /> Stitching Fee
+                    </label>
+                    <div className="relative rounded-md shadow-sm">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span className="text-gray-500 sm:text-sm">Rs.</span></div>
+                      <input
+                        type="number"
+                        name="stitchFee"
+                        value={item.stitchFee || 0}
+                        onChange={e => handleItemChange(itemIndex, e)}
+                        min="0"
+                        step="0.01"
+                        placeholder="0"
+                        className="block w-full rounded-md border border-purple-200 bg-purple-50 py-1.5 px-3 pl-9 text-sm font-bold text-purple-700 focus:border-purple-400 focus:ring-purple-300 focus:ring-1 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-28 text-right">
                     <label className="block text-xs font-medium text-gray-500 mb-2">Subtotal</label>
-                    <span className="font-bold text-gray-800">Rs. {(item.quantity * (item.pricePerUnit || 0)).toFixed(2)}</span>
+                    <span className="font-bold text-gray-800">Rs. {(((item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1)) + ((item.stitchFee || 0) * (item.quantity || 1))).toFixed(2)}</span>
                   </div>
                   <div className="flex-none ml-auto pt-5">
                     {order.items.length > 1 && (
@@ -1031,6 +1181,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
             </h3>
             <div className="space-y-4">
               <div className="flex justify-between items-center text-gray-500 font-medium">
+                <span>Material Subtotal</span>
+                <span>Rs. {order.items.reduce((s, i) => s + ((i.clothSize || 0) * (i.pricePerUnit || 0) * (i.quantity || 1)), 0).toFixed(2)}</span>
+              </div>
+              {totalStitchFee > 0 && (
+                <div className="flex justify-between items-center text-purple-600 font-medium">
+                  <span className="flex items-center gap-1"><Scissors size={13} /> Stitching Fee</span>
+                  <span>Rs. {totalStitchFee.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-gray-700 font-semibold border-t border-gray-100 pt-2">
                 <span>Subtotal</span>
                 <span>Rs. {grandTotal.toFixed(2)}</span>
               </div>
@@ -1045,7 +1205,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
               <div className="flex justify-between items-center pt-2">
                 <span className="text-lg font-black text-slate-800 uppercase tracking-tighter">Final Amount</span>
-                <span className="text-3xl font-black text-indigo-600">Rs. {finalAmount.toLocaleString()}</span>
+                <span className="text-3xl font-black text-indigo-600">Rs. {roundedFinalAmount.toLocaleString()}</span>
               </div>
 
               <div className={`flex justify-between items-center mt-4 p-4 rounded-xl border-2 transition-all ${balance > 0

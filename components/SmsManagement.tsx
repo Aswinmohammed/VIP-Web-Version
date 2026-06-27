@@ -83,7 +83,7 @@ const emptySettingsForm = {
   apiKeyRef: '',
   isEnabled: false,
   transactionalEnabled: true,
-  marketingEnabled: false,
+  marketingEnabled: true,
   dailySmsLimit: 2,
   campaignRecipientLimit: 500,
   costPerSegment: 0,
@@ -977,62 +977,15 @@ const SmsManagementContent: React.FC = () => {
             </div>
 
             <form className="mt-6 space-y-6" onSubmit={handleSaveSettings}>
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                <p className="font-bold">Intech quick setup</p>
-                <p className="mt-2 leading-6">
-                  Use <span className="font-semibold">{INTECH_GATEWAY_BASE_URL}</span> as the gateway URL and{' '}
-                  <span className="font-semibold">{INTECH_API_KEY_REFERENCE}</span> as the API key reference. Your real
-                  API key should stay on the server as an environment variable.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleApplyIntechPreset}
-                  className="mt-3 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-                >
-                  <Sparkles size={16} />
-                  Use Intech preset
-                </button>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Provider Name</label>
-                  <input
-                    value={settingsForm.providerName}
-                    onChange={(event) => setSettingsForm((current) => ({ ...current, providerName: event.target.value }))}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                    placeholder="Twilio / Notify / Vonage"
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Sender ID</label>
-                  <input
-                    value={settingsForm.senderId}
-                    onChange={(event) => setSettingsForm((current) => ({ ...current, senderId: event.target.value }))}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                    placeholder="VIPTAILOR"
-                  />
-                  <p className="mt-2 text-xs text-slate-500">Use the approved sender ID given by Intech, not a random label.</p>
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Gateway Base URL</label>
-                  <input
-                    value={settingsForm.apiBaseUrl}
-                    onChange={(event) => setSettingsForm((current) => ({ ...current, apiBaseUrl: event.target.value }))}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                    placeholder="https://api.sms-provider.com"
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">API Key Reference</label>
-                  <input
-                    value={settingsForm.apiKeyRef}
-                    onChange={(event) => setSettingsForm((current) => ({ ...current, apiKeyRef: event.target.value }))}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                    placeholder="env:VIP_SMS_API_KEY"
-                  />
-                  <p className="mt-2 text-xs text-slate-500">Recommended for Intech: <span className="font-semibold">{INTECH_API_KEY_REFERENCE}</span></p>
-                </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">Sender ID</label>
+                <input
+                  value={settingsForm.senderId}
+                  onChange={(event) => setSettingsForm((current) => ({ ...current, senderId: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
+                  placeholder="VIP TAILORS"
+                />
+                <p className="mt-2 text-xs text-slate-500">Use the approved sender ID registered with Intech (e.g. VIP TAILORS).</p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
@@ -1464,6 +1417,11 @@ const SmsManagementContent: React.FC = () => {
 
       {activeTab === 'campaigns' && (
         <div className="space-y-8">
+          {!settingsForm.marketingEnabled && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900">
+              <span className="font-bold">Marketing SMS is currently disabled.</span> Bulk campaigns will be skipped for all recipients until you enable it. Go to the <button type="button" onClick={() => setActiveTab('overview')} className="underline font-semibold hover:text-amber-700">Overview → SMS Settings</button> tab and turn on <span className="font-semibold">Marketing SMS</span>, then save.
+            </div>
+          )}
           <section className="grid gap-8 xl:grid-cols-[1.1fr_0.9fr]">
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">

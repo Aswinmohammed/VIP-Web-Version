@@ -1,37 +1,13 @@
-import React, { useContext, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppContext } from '../context/AppContext';
 import { InventoryItem } from '../types';
-import { PlusCircle, Edit, Trash2, Package, Download, Loader2, Printer, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, Package, Download, Loader2, Printer, AlertCircle, Tag, X, Eye } from 'lucide-react';
 import jsPDF from 'jspdf';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
+import JsBarcode from 'jsbarcode';
 
-const createInventoryCode = (name: string, existingItems: InventoryItem[], currentId?: string) => {
-  const cleaned = name
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 18) || 'ITEM';
-
-  const takenCodes = new Set(
-    existingItems
-      .filter((item) => item.id !== currentId)
-      .map((item) => item.itemCode?.trim().toUpperCase())
-      .filter(Boolean)
-  );
-
-  if (!takenCodes.has(cleaned)) {
-    return cleaned;
-  }
-
-  let counter = 2;
-  while (takenCodes.has(`${cleaned}-${counter}`)) {
-    counter += 1;
-  }
-  return `${cleaned}-${counter}`;
-};
-
+// Removed createInventoryCode since backend handles it
 const InventoryForm: React.FC<{
   item?: InventoryItem;
   inventory: InventoryItem[];
@@ -58,7 +34,7 @@ const InventoryForm: React.FC<{
     const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === 'number' ? parseFloat(value) || 0 : value,
+      [name]: type === 'number' ? parseFloat(value) || 0 : type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
     }));
   };
 
@@ -66,15 +42,15 @@ const InventoryForm: React.FC<{
     e.preventDefault();
     setIsSaving(true);
     try {
-      const itemCode = (formData.itemCode || createInventoryCode(formData.name, inventory, item?.id)).toUpperCase();
       const unitPrice = Number(formData.unitPrice || 0);
       await onSave({
         ...formData,
         id: item?.id || `INV${Date.now()}`,
-        itemCode,
-        barcodeValue: formData.barcodeValue || itemCode,
+        itemCode: formData.itemCode?.trim().toUpperCase() || '',
+        barcodeValue: formData.barcodeValue?.trim() || '',
         mrp: formData.mrp || unitPrice,
         wholesalePrice: formData.wholesalePrice || unitPrice,
+        isActive: formData.isActive !== false,
         lastUpdated: new Date().toISOString().split('T')[0],
       });
     } finally {
@@ -136,6 +112,65 @@ const InventoryForm: React.FC<{
                 className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
               />
             </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">MRP (Rs.)</label>
+              <input
+                type="number"
+                name="mrp"
+                value={formData.mrp}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Wholesale Price (Rs.)</label>
+              <input
+                type="number"
+                name="wholesalePrice"
+                value={formData.wholesalePrice}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Item Code (Leave empty to auto-generate)</label>
+              <input
+                type="text"
+                name="itemCode"
+                value={formData.itemCode || ''}
+                onChange={handleChange}
+                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
+                placeholder="e.g. FAB0001"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Barcode (Optional)</label>
+              <input
+                type="text"
+                name="barcodeValue"
+                value={formData.barcodeValue || ''}
+                onChange={handleChange}
+                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
+                placeholder="Scanner input here"
+              />
+            </div>
+            <div className="flex items-center mt-6">
+              <input
+                type="checkbox"
+                name="isActive"
+                id="isActive"
+                checked={formData.isActive !== false}
+                onChange={handleChange}
+                className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
+                Active (Available for orders)
+              </label>
+            </div>
           </div>
 
           <div className="mt-4 flex justify-end space-x-3 border-t pt-6">
@@ -157,6 +192,126 @@ const Inventory: React.FC = () => {
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
   const [isGenerating, setIsGenerating] = useState(false);
   const inventoryRef = useRef<HTMLDivElement>(null);
+  const [previewItem, setPreviewItem] = useState<InventoryItem | null>(null);
+
+  /**
+   * generateBarcodeSvg — uses JsBarcode on a detached SVG element to produce
+   * a fully self-contained SVG string that does NOT depend on React or the DOM
+   * being mounted. This is the core fix for the print reliability issue.
+   */
+  const generateBarcodeSvg = (value: string): string => {
+    try {
+      const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svgEl, value, {
+        format: 'CODE128',
+        width: 1.8,
+        height: 48,
+        displayValue: true,
+        fontSize: 11,
+        margin: 4,
+        background: '#ffffff',
+        lineColor: '#000000',
+      });
+      return svgEl.outerHTML;
+    } catch {
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="60"><text x="10" y="30" font-size="10" fill="red">Invalid barcode</text></svg>';
+    }
+  };
+
+  /**
+   * buildLabelHtml — constructs a complete, self-contained HTML document for the
+   * print window. Contains all CSS inline; no external dependencies.
+   * Label spec: Item Code + Item Name + Barcode
+   */
+  const buildLabelHtml = (item: InventoryItem): string => {
+    const barcodeValue = item.barcodeValue || item.itemCode || 'UNKNOWN';
+    const svgContent = generateBarcodeSvg(barcodeValue);
+    const itemName = item.name.length > 28 ? item.name.slice(0, 26) + '…' : item.name;
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Label – ${item.itemCode}</title>
+  <style>
+    @page { size: 58mm 40mm; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 58mm;
+      height: 40mm;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .label {
+      width: 58mm;
+      padding: 2mm 3mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 1.5mm;
+    }
+    .item-code {
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      color: #555;
+      text-transform: uppercase;
+    }
+    .item-name {
+      font-size: 11px;
+      font-weight: bold;
+      color: #000;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 52mm;
+    }
+    svg {
+      max-width: 52mm;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="label">
+    <div class="item-code">${item.itemCode || ''}</div>
+    <div class="item-name">${itemName}</div>
+    ${svgContent}
+  </div>
+</body>
+</html>`;
+  };
+
+  const handlePrintLabel = (item: InventoryItem) => {
+    setPreviewItem(item);
+  };
+
+  const executePrint = (item: InventoryItem) => {
+    const html = buildLabelHtml(item);
+    const printWindow = window.open('', '_blank', 'width=320,height=260,toolbar=0,menubar=0,scrollbars=0');
+    if (!printWindow) {
+      alert('Pop-up blocked. Please allow pop-ups for this site to print labels.');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    // Use setTimeout as a reliable cross-browser print trigger
+    // (window.onload is inconsistent in Chromium for about:blank windows)
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+      // Delay close to allow print dialog to fully open
+      setTimeout(() => {
+        try { printWindow.close(); } catch { /* may already be closed by user */ }
+      }, 1000);
+    }, 250);
+    setPreviewItem(null);
+  };
 
   if (!context) return <div>Loading...</div>;
   const {
@@ -417,7 +572,7 @@ const Inventory: React.FC = () => {
                 <th className="px-6 py-4">Category</th>
                 <th className="px-6 py-4">Quantity</th>
                 <th className="px-6 py-4">Unit Price</th>
-                <th className="px-6 py-4">Last Updated</th>
+                <th className="px-6 py-4">Status</th>
                 {isAllBranchesScope && <th className="px-6 py-4">Branch</th>}
                 <th className="px-6 py-4 text-center print:hidden">Actions</th>
               </tr>
@@ -429,10 +584,17 @@ const Inventory: React.FC = () => {
                   <td className="px-6 py-4">{item.category}</td>
                   <td className="px-6 py-4 font-medium">{item.quantity}</td>
                   <td className="px-6 py-4 font-bold text-slate-900">Rs. {item.unitPrice.toFixed(2)}</td>
-                  <td className="px-6 py-4 text-xs text-gray-500">{item.lastUpdated}</td>
+                  <td className="px-6 py-4 text-xs">
+                    {item.isActive !== false ? (
+                      <span className="rounded-full bg-green-100 px-2 py-1 text-green-700 font-bold">Active</span>
+                    ) : (
+                      <span className="rounded-full bg-red-100 px-2 py-1 text-red-700 font-bold">Inactive</span>
+                    )}
+                  </td>
                   {isAllBranchesScope && <td className="px-6 py-4 font-semibold text-slate-600">{getBranchName(item.branchId)}</td>}
                   <td className="px-6 py-4 print:hidden">
                     <div className="flex justify-center space-x-2">
+                      <button onClick={() => handlePrintLabel(item)} className="rounded-lg p-2 text-indigo-600 transition-colors hover:bg-indigo-50" title="Print Label"><Tag size={18} /></button>
                       <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50" title="Edit Item"><Edit size={18} /></button>
                       <button onClick={() => void handleDelete(item.id)} className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50" title="Delete Item"><Trash2 size={18} /></button>
                     </div>
@@ -449,8 +611,90 @@ const Inventory: React.FC = () => {
         </div>
       </div>
       {isModalOpen && <InventoryForm item={editingItem} inventory={inventory} onSave={handleSave} onCancel={() => setIsModalOpen(false)} />}
+
+      {/* ── Print Preview Modal ── */}
+      {previewItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Tag size={18} className="text-indigo-600" />
+                <h2 className="text-base font-bold text-slate-800">Label Preview</h2>
+              </div>
+              <button
+                onClick={() => setPreviewItem(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Label Preview Area — mirrors the printed label layout */}
+            <div className="flex flex-col items-center justify-center py-8 px-6 bg-slate-50">
+              <div
+                className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center gap-2 shadow-inner"
+                style={{ width: 220, minHeight: 140 }}
+              >
+                {/* Item Code */}
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  {previewItem.itemCode || '—'}
+                </p>
+                {/* Item Name */}
+                <p className="text-sm font-bold text-slate-900 text-center leading-tight max-w-[190px] truncate">
+                  {previewItem.name}
+                </p>
+                {/* Live Barcode Preview rendered via useEffect on canvas */}
+                <BarcodePreview value={previewItem.barcodeValue || previewItem.itemCode || 'UNKNOWN'} />
+                <p className="text-[9px] text-slate-400 font-mono">
+                  {previewItem.barcodeValue || previewItem.itemCode}
+                </p>
+              </div>
+              <p className="mt-3 text-xs text-slate-400 italic">Prints on 58mm × 40mm label</p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 px-6 py-4 border-t border-slate-100 bg-white">
+              <button
+                onClick={() => setPreviewItem(null)}
+                className="flex-1 rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => executePrint(previewItem)}
+                className="flex-1 rounded-lg bg-indigo-600 py-2 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Printer size={15} /> Print Label
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+};
+
+/** Small helper component: renders a barcode into a canvas for preview */
+const BarcodePreview: React.FC<{ value: string }> = ({ value }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!canvasRef.current || !value) return;
+    try {
+      JsBarcode(canvasRef.current, value, {
+        format: 'CODE128',
+        width: 1.4,
+        height: 36,
+        displayValue: false,
+        margin: 2,
+        background: '#ffffff',
+        lineColor: '#000000',
+      });
+    } catch {
+      // If value is invalid, leave canvas blank
+    }
+  }, [value]);
+  return <canvas ref={canvasRef} className="max-w-full" />;
 };
 
 export default Inventory;

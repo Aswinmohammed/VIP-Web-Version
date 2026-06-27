@@ -29,7 +29,7 @@ const escapeHtml = (value: string): string =>
     .replace(/'/g, '&#39;');
 
 const openPrintWindow = (html: string, title: string): boolean => {
-  const printWindow = window.open('', '_blank', 'width=420,height=320');
+  const printWindow = window.open('', '_blank', 'width=800,height=600');
   if (!printWindow) {
     alert('Unable to open the print dialog. Please allow popups for this app.');
     return false;

@@ -993,10 +993,12 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       const orderIdStr = String(order.id || '');
 
       // ── Status filter (strict match with case insensitivity for robustness) ──
+      const normalizeStatus = (s: string) => s.trim().toLowerCase().replace(/_/g, ' ');
+      
       if (statusFilter === 'Emergency') {
         if (!order.emergency) return false;
       } else if (statusFilter !== 'All') {
-        if (orderStatus.trim().toLowerCase() !== statusFilter.trim().toLowerCase()) return false;
+        if (normalizeStatus(orderStatus) !== normalizeStatus(statusFilter)) return false;
       }
 
       // ── Date range filter (compare date parts only) ──
@@ -1023,19 +1025,30 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         }
 
         // ── ID Search ──
-        const orderIdNormalized = orderIdStr.trim().toLowerCase(); 
+        const orderIdNormalized = orderIdStr.trim().toLowerCase();
         const orderIdCompact = orderIdNormalized.replace(/\s+/g, '');
-        const orderIdDigits = orderIdStr.replace(/\D/g, ''); 
-        const orderIdStripped = orderIdDigits.replace(/^0+/, ''); 
+        const orderIdDigits = orderIdStr.replace(/\D/g, '');
+        const orderIdStripped = orderIdDigits.replace(/^0+/, '');
+        // Also search order_number if available
+        const orderNumber = String((order as any).orderNumber || '').trim().toLowerCase();
 
         const searchStrippedZeros = searchDigits.replace(/^0+/, '');
 
         if (searchDigits) {
-          // Strict match to prevent false positives (e.g. searching 14 strictly matches ORD-14, not 141)
-          if (orderIdStripped === searchStrippedZeros || orderIdDigits === searchDigits) {
+          // Substring match for numeric searches: "14" matches ORD-0014, ORD-14, etc.
+          if (
+            (searchStrippedZeros && orderIdStripped.includes(searchStrippedZeros)) ||
+            (searchDigits && orderIdDigits.includes(searchDigits)) ||
+            orderIdNormalized.includes(cleanSearch) ||
+            orderNumber.includes(cleanSearch)
+          ) {
             return true;
           }
-        } else if (orderIdCompact === cleanSearch.replace(/\s+/g, '') || orderIdCompact === `ord-${cleanSearch.replace(/\s+/g, '')}`) {
+        } else if (
+          orderIdCompact.includes(cleanSearch.replace(/\s+/g, '')) ||
+          orderIdCompact === `ord-${cleanSearch.replace(/\s+/g, '')}` ||
+          orderNumber.includes(cleanSearch)
+        ) {
           return true;
         }
 
@@ -1080,6 +1093,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       { label: 'Packed', value: 'Packed' },
     ] : []),
     { label: 'Delivered', value: 'Delivered' },
+    { label: 'Cancelled', value: 'Cancelled' },
     { label: 'Due Orders', value: 'Due' },
     { label: 'Emergency Orders', value: 'Emergency' },
   ];

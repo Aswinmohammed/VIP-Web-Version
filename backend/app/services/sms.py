@@ -359,6 +359,7 @@ def get_or_create_sms_settings(db: Session, tenant_id) -> SmsSettings:
         api_key_ref=INTECH_API_KEY_REFERENCE,
         is_enabled=True,
         transactional_enabled=True,
+        marketing_enabled=True,
         sender_id="VIP TAILORS"
     )
     db.add(settings)

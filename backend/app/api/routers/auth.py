@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import get_settings
+from backend.app.dependencies import require_master_admin, AuthenticatedActor
 from backend.app.database import get_db, engine
 from backend.app.models import Tenant, User
 from backend.app.schemas import LoginRequest, RefreshTokenRequest, TokenResponse, TokenUser
@@ -69,8 +71,14 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) 
 
 
 @router.get("/debug-orders")
-def debug_orders(db: Session = Depends(get_db)):
+def debug_orders(
+    db: Session = Depends(get_db),
+    actor: AuthenticatedActor = Depends(require_master_admin)
+):
     """Count all orders in the database across all tenants."""
+    settings = get_settings()
+    if settings.environment == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     try:
         total_orders = db.scalar(text("SELECT count(*) FROM orders"))
         tenant_counts = db.execute(
@@ -85,8 +93,15 @@ def debug_orders(db: Session = Depends(get_db)):
 
 
 @router.get("/fix-tenant")
-def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
+def fix_tenant(
+    code: str | None = None,
+    db: Session = Depends(get_db),
+    actor: AuthenticatedActor = Depends(require_master_admin)
+):
     """Force moves ALL data to the correct tenant."""
+    settings = get_settings()
+    if settings.environment == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     try:
         my_tenant_id = None
         if code:
@@ -153,8 +168,14 @@ def fix_tenant(code: str | None = None, db: Session = Depends(get_db)):
 
 
 @router.get("/run-import")
-def run_import(db: Session = Depends(get_db)):
+def run_import(
+    db: Session = Depends(get_db),
+    actor: AuthenticatedActor = Depends(require_master_admin)
+):
     """Run migration using the committed JSON backup file inside the container."""
+    settings = get_settings()
+    if settings.environment == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     import sys
     import traceback
     from collections import defaultdict

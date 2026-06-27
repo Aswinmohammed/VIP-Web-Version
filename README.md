@@ -233,3 +233,25 @@ python backend/scripts/smoke_test.py --base-url https://your-domain.example.com 
 - [backend/app/main.py](/D:/VIP%20Web%20Version/backend/app/main.py:1) is the production API entrypoint
 - The frontend already assumes same-origin API routing, which is why the Nginx reverse proxy pattern is the cleanest Coolify fit
 - A future cleanup would be to move the frontend files into a dedicated `frontend/` directory, but it is not required for deployment
+
+## Development Workflow
+
+The project now has a staged development workflow for local development, staging validation, and production deployment.
+
+Start here:
+
+- [Environment architecture](docs/environment-architecture.md)
+- [Local development setup](docs/local-development.md)
+- [Release and Git workflow](docs/release-process.md)
+- [Database workflow](docs/database-workflow.md)
+- [Security and operations](docs/security-operations.md)
+- [Production release runbook](docs/production-release-runbook.md)
+
+Key files:
+
+- `.env.development.example`, `.env.staging.example`, `.env.production.example`
+- `deploy/docker-compose.dev.yml`
+- `deploy/docker-compose.staging.yml`
+- `deploy/docker-compose.production.yml`
+- `.github/workflows/ci-cd.yml`
+- `alembic.ini` and `backend/alembic/`

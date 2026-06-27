@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vip_tailors_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - vip_tailors_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vip_tailors_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      VIP_ENVIRONMENT: development
+      VIP_DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/vip_tailors_dev
+      VIP_JWT_SECRET_KEY: local-dev-secret-change-me-32-characters
+      VIP_CREATE_TABLES_ON_STARTUP: "true"
+      VIP_CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080
+      VIP_SMS_API_KEY: ""
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  vip_tailors_dev_db:

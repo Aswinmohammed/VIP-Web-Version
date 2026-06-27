@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, Uuid, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, Uuid, UniqueConstraint, func, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -52,6 +52,7 @@ class OrderStatus(str, enum.Enum):
     PACKED = "Packed"
     DUE = "Due"
     DELIVERED = "Delivered"
+    CANCELLED = "Cancelled"
 
 
 class CompletionStatus(str, enum.Enum):
@@ -153,7 +154,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, TenantScopedMixin, Base):
 
 class Customer(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
     __tablename__ = "customers"
-    __table_args__ = (UniqueConstraint("tenant_id", "legacy_id", name="uq_customers_tenant_legacy"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "legacy_id", name="uq_customers_tenant_legacy"),
+        Index("idx_customers_tenant_branch_name", "tenant_id", "branch_id", "name"),
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -171,7 +175,12 @@ class Customer(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdM
 
 class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
     __tablename__ = "orders"
-    __table_args__ = (UniqueConstraint("tenant_id", "legacy_id", name="uq_orders_tenant_legacy"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "legacy_id", name="uq_orders_tenant_legacy"),
+        UniqueConstraint("tenant_id", "order_number", name="uq_orders_tenant_number"),
+        Index("idx_orders_tenant_branch_date", "tenant_id", "branch_id", "order_date"),
+        Index("idx_orders_tenant_status", "tenant_id", "status"),
+    )
 
     customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False, index=True)
     order_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
@@ -267,7 +276,11 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMi
 
 class InventoryItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
     __tablename__ = "inventory_items"
-    __table_args__ = (UniqueConstraint("tenant_id", "legacy_id", name="uq_inventory_items_tenant_legacy"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "legacy_id", name="uq_inventory_items_tenant_legacy"),
+        Index("idx_inventory_items_tenant_barcode", "tenant_id", "barcode_value"),
+        Index("idx_inventory_items_tenant_name", "tenant_id", "name"),
+    )
 
     item_code: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     barcode_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -278,6 +291,7 @@ class InventoryItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Lega
     mrp: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     wholesale_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     last_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class Expense(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
@@ -293,7 +307,7 @@ class MaterialSale(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Legac
     __tablename__ = "material_sales"
     __table_args__ = (UniqueConstraint("tenant_id", "legacy_id", name="uq_material_sales_tenant_legacy"),)
 
-    sale_date: Mapped[date] = mapped_column(Date, nullable=False)
+    sale_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     discount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
@@ -309,7 +323,7 @@ class MaterialSaleItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, L
     __table_args__ = (UniqueConstraint("tenant_id", "legacy_id", name="uq_material_sale_items_tenant_legacy"),)
 
     material_sale_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("material_sales.id", ondelete="CASCADE"), nullable=False, index=True)
-    inventory_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True)
+    inventory_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True, index=True)
     source_inventory_legacy_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     category: Mapped[str] = mapped_column(String(120), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)

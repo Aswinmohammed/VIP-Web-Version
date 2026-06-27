@@ -61,7 +61,7 @@ import {
 
 const SETTINGS_STORAGE_KEY = 'vip_tailors_cloud_settings';
 const COLLECTION_SYNC_DEBOUNCE_MS = 400;
-const CLOUD_REFRESH_INTERVAL_MS = 45000;
+const CLOUD_REFRESH_INTERVAL_MS = 15000;
 
 const DEFAULT_LOCATIONS = [
   'Kalmunai',
@@ -245,8 +245,8 @@ const PAGE_DATASETS: Record<Page, CloudDataset[]> = {
   Customers: ['customers'],
   Orders: ['customers', 'orders', 'employees'],
   'Due Orders': ['customers', 'orders'],
-  'Add Order': ['customers', 'orders'],
-  'Edit Order': ['customers', 'orders'],
+  'Add Order': ['customers', 'orders', 'inventory'],
+  'Edit Order': ['customers', 'orders', 'inventory'],
   Invoice: ['customers', 'orders'],
   Inventory: ['inventory'],
   Reports: ['customers', 'orders', 'inventory', 'expenses', 'materialSales', 'employees'],
@@ -676,6 +676,7 @@ const App: React.FC = () => {
     const isSilent = options?.silent ?? false;
     const force = options?.force ?? false;
 
+    let allCached = true;
     let hasAppliedCachedData = false;
     for (const dataset of datasets) {
       const cacheKey = getScopeCacheKey(dataset, scope);
@@ -684,6 +685,8 @@ const App: React.FC = () => {
       if (cached) {
         applyDatasetState(dataset, cached);
         hasAppliedCachedData = true;
+      } else {
+        allCached = false;
       }
     }
 
@@ -691,6 +694,16 @@ const App: React.FC = () => {
     if (shouldShowPageLoader) {
       setPageLoadingLabel(getPageLoadingText(targetPage));
       setIsPageLoading(true);
+    }
+
+    const timeSinceLastRefresh = Date.now() - lastCloudRefreshAtRef.current;
+    const shouldFetch = force || !allCached || !isInitialCloudLoadCompleteRef.current || isSilent || timeSinceLastRefresh > CLOUD_REFRESH_INTERVAL_MS;
+
+    if (!shouldFetch) {
+      if (shouldShowPageLoader) {
+        setIsPageLoading(false);
+      }
+      return;
     }
 
     try {
