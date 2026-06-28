@@ -356,10 +356,15 @@ def is_order_ready_status(status: OrderStatus | str) -> bool:
 def calculate_order_total(order: Order) -> Decimal:
     items_total = Decimal("0.00")
     for item in order.items:
-        cloth_size = Decimal(item.cloth_size) if item.cloth_size is not None else Decimal("0.00")
-        price_per_unit = Decimal(item.price_per_unit) if item.price_per_unit is not None else Decimal("0.00")
-        quantity = Decimal(item.quantity) if item.quantity is not None else Decimal("1.00")
-        stitch_fee = Decimal(item.stitch_fee) if item.stitch_fee is not None else Decimal("0.00")
+        cloth_size_val = getattr(item, 'cloth_size', None)
+        price_per_unit_val = getattr(item, 'price_per_unit', None)
+        quantity_val = getattr(item, 'quantity', None)
+        stitch_fee_val = getattr(item, 'stitch_fee', None)
+        
+        cloth_size = Decimal(cloth_size_val) if cloth_size_val is not None else Decimal("0.00")
+        price_per_unit = Decimal(price_per_unit_val) if price_per_unit_val is not None else Decimal("0.00")
+        quantity = Decimal(quantity_val) if quantity_val is not None else Decimal("1.00")
+        stitch_fee = Decimal(stitch_fee_val) if stitch_fee_val is not None else Decimal("0.00")
         
         material_cost = cloth_size * price_per_unit * quantity
         stitch_cost = stitch_fee * quantity

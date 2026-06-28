@@ -25,7 +25,9 @@ from backend.app.services.sms import (
     is_order_ready_status,
     queue_due_reminder_sms,
     queue_order_delivered_sms,
-    queue_order_confirmation_sms,`r`n    queue_payment_due_status_sms,`r`n    queue_order_ready_sms,
+    queue_order_confirmation_sms,
+    queue_payment_confirmation_sms,
+    queue_order_ready_sms,
     queue_thank_you_sms,
 )
 
@@ -773,4 +775,6 @@ def download_invoice(order_id: uuid.UUID, actor: AuthenticatedActor = Depends(ge
     pdf_bytes = render_invoice_pdf(order, order.customer)
     headers = {"Content-Disposition": f'inline; filename="{order.order_number}.pdf"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
 

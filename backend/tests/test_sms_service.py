@@ -79,7 +79,7 @@ def test_calculate_order_balance_falls_back_to_advance_and_never_goes_negative()
     order = SimpleNamespace(
         discount=Decimal("0.00"),
         advance=Decimal("80.00"),
-        items=[SimpleNamespace(quantity=1, price_per_unit=Decimal("50.00"))],
+        items=[SimpleNamespace(quantity=1, cloth_size=Decimal("1.00"), price_per_unit=Decimal("50.00"))],
         payments=[],
     )
 
@@ -95,7 +95,7 @@ def test_build_order_variables_include_paid_amount_for_combined_confirmation() -
         due_date=sms_service.date(2026, 4, 25),
         discount=Decimal("0.00"),
         advance=Decimal("0.00"),
-        items=[SimpleNamespace(quantity=1, price_per_unit=Decimal("120.00"))],
+        items=[SimpleNamespace(quantity=1, cloth_size=Decimal("1.00"), price_per_unit=Decimal("120.00"))],
         payments=[SimpleNamespace(amount=Decimal("50.00"))],
         branch_rel=SimpleNamespace(phone="0777770811"),
     )
@@ -118,7 +118,7 @@ def test_build_order_variables_include_branch_name_when_available() -> None:
         due_date=sms_service.date(2026, 4, 25),
         discount=Decimal("0.00"),
         advance=Decimal("0.00"),
-        items=[SimpleNamespace(quantity=1, price_per_unit=Decimal("120.00"))],
+        items=[SimpleNamespace(quantity=1, cloth_size=Decimal("1.00"), price_per_unit=Decimal("120.00"))],
         payments=[],
         branch_rel=SimpleNamespace(name="STR Branch", phone="0777770811"),
     )
