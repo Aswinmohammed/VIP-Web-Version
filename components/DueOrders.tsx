@@ -3,7 +3,7 @@ import { AppContext } from '../context/AppContext';
 import { Order, Page } from '../types';
 import { Phone, Edit, DollarSign, X, Search, Filter, Printer, Download, Loader2, Eye, MessageSquare, Send } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { sendCloudOrderSms } from '../utils/cloudApi';
+import { sendCloudOrderSms, addCloudPayment } from '../utils/cloudApi';
 import { downloadDataUri } from '../utils/downloads';
 
 const OWNER_CONTACT_PHONE = '077 777 0811';
@@ -14,19 +14,20 @@ interface CollectionModalProps {
   customer: any;
   computeFinal: (o: Order) => any;
   onClose: () => void;
-  onSubmit: (amount: number, date: string, method: string, note: string) => void;
+  onSubmit: (amount: number, date: string, method: string, note: string) => Promise<void>;
+  isSubmitting?: boolean;
   formatOrderId: (id: string) => string;
   formatPhoneNumber: (phone: string | undefined | null) => string;
 }
 
-const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, computeFinal, onClose, onSubmit, formatOrderId, formatPhoneNumber }) => {
+const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, computeFinal, onClose, onSubmit, isSubmitting, formatOrderId, formatPhoneNumber }) => {
   const { balance } = computeFinal(order);
   const [amount, setAmount] = useState(balance.toString());
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [method, setMethod] = useState<'Cash' | 'Card' | 'Bank Transfer' | 'Cheque'>('Cash');
   const [note, setNote] = useState('');
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -37,7 +38,7 @@ const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, comp
       alert(`Amount cannot exceed due balance of Rs. ${balance.toLocaleString()}`);
       return;
     }
-    onSubmit(numAmount, date, method, note);
+    await onSubmit(numAmount, date, method, note);
   };
 
   return (
@@ -136,12 +137,14 @@ const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, comp
           >
             Cancel
           </button>
-          <button
-            type="submit"
-            className="flex-1 px-4 py-2.5 text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 font-bold transition-colors shadow-md"
-          >
-            Collect Payment
-          </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 bg-emerald-500 text-white rounded-xl py-3 font-bold text-sm hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
+              {isSubmitting ? 'Saving...' : 'Record Payment'}
+            </button>
         </div>
       </form>
     </div>
@@ -431,6 +434,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collectionModalOpen, setCollectionModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [dueSmsModalOpen, setDueSmsModalOpen] = useState(false);
   const [selectedSmsOrder, setSelectedSmsOrder] = useState<Order | null>(null);
   const [dueListModalOpen, setDueListModalOpen] = useState(false);
@@ -551,43 +555,51 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
     alert(`SMS sent successfully to ${formatPhoneNumber(result.phoneNormalized || phone)}.`);
   };
 
-  const handleSubmitCollection = (amount: number, date: string, method: string, note: string) => {
+  const handleSubmitCollection = async (amount: number, date: string, method: string, note: string) => {
     if (!selectedOrder) return;
+    if (!accessToken) {
+      alert('Authentication required. Please log in again.');
+      return;
+    }
+    if (!selectedOrder.serverId) {
+      alert('This order must be synced to the cloud before collecting a payment.');
+      return;
+    }
 
-    const updatedOrders = orders.map(o => {
-      if (o.id !== selectedOrder.id) return o;
+    setIsSubmittingPayment(true);
+    try {
+      const newPayment = await addCloudPayment(accessToken, selectedOrder.serverId, {
+        amount,
+        payment_date: date,
+        method: method as 'Cash' | 'Card' | 'Bank Transfer' | 'Cheque',
+        note: note || undefined,
+      });
 
-      const newPayment = {
-        id: `PAY-${Date.now()}`,
-        branchId: o.branchId || activeBranchId,
-        collectorId: currentUser?.id || 'SYSTEM',
-        amount: amount,
-        date: date,
-        method: method as any,
-        note: note || 'Collection Payment'
-      };
+      const updatedOrders = orders.map(o => {
+        if (o.id !== selectedOrder.id) return o;
 
-      const updatedPayments = [...(o.payments || []), newPayment];
-      const totalPaid = updatedPayments.reduce((s, p) => s + p.amount, 0);
-      const itemsTotal = o.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
-      const discount = Number((o as any).discount) || 0;
-      const final = Math.max(0, itemsTotal - discount);
-      const newBalance = Math.max(0, final - totalPaid);
+        const updatedPayments = [...(o.payments || []), newPayment];
+        const itemsTotal = o.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
+        const discount = Number((o as any).discount) || 0;
+        const final = Math.max(0, itemsTotal - discount);
+        const totalPaid = updatedPayments.reduce((s, p) => s + p.amount, 0);
+        const newBalance = Math.max(0, final - totalPaid);
 
-      const newStatus = newBalance === 0 ? ('Delivered' as const) : ('Due' as const);
+        const newStatus: Order['status'] = newBalance === 0 ? 'Delivered' : 'Due';
 
-      return {
-        ...o,
-        status: newStatus,
-        payments: updatedPayments,
-        advance: totalPaid
-      };
-    });
+        return { ...o, status: newStatus, payments: updatedPayments };
+      });
 
-    setOrders(updatedOrders);
-    alert(`✅ Payment of Rs. ${amount.toLocaleString()} collected successfully!`);
-    setCollectionModalOpen(false);
-    setSelectedOrder(null);
+      setOrders(updatedOrders);
+      alert(`✅ Payment of Rs. ${amount.toLocaleString()} recorded successfully! SMS notification sent to customer.`);
+      setCollectionModalOpen(false);
+      setSelectedOrder(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      alert(`❌ Failed to record payment: ${message}`);
+    } finally {
+      setIsSubmittingPayment(false);
+    }
   };
 
   const handlePrintDueList = () => {
@@ -791,8 +803,14 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
           order={selectedOrder}
           customer={customers.find(c => c.id === selectedOrder.customerId)}
           computeFinal={computeFinal}
-          onClose={() => setCollectionModalOpen(false)}
+          onClose={() => {
+            if (!isSubmittingPayment) {
+              setCollectionModalOpen(false);
+              setSelectedOrder(null);
+            }
+          }}
           onSubmit={handleSubmitCollection}
+          isSubmitting={isSubmittingPayment}
           formatOrderId={formatOrderId}
           formatPhoneNumber={formatPhoneNumber}
         />

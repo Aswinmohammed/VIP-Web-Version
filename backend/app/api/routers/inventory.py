@@ -48,7 +48,7 @@ def _default_barcode_value(item_code: str) -> str:
 
 
 def _get_inventory_item_or_404(db: Session, actor: AuthenticatedActor, item_id: uuid.UUID) -> InventoryItem:
-    item = db.scalar(apply_branch_scope(select(InventoryItem).where(InventoryItem.id == item_id), InventoryItem, actor))
+    item = db.scalar(select(InventoryItem).where(InventoryItem.id == item_id, InventoryItem.tenant_id == actor.tenant_id))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found")
     return item
@@ -61,12 +61,7 @@ def list_inventory(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[InventoryItem]:
-    stmt = apply_branch_scope(
-        select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast(), InventoryItem.name.asc()),
-        InventoryItem,
-        actor,
-        branch_id,
-    )
+    stmt = select(InventoryItem).where(InventoryItem.tenant_id == actor.tenant_id).order_by(InventoryItem.item_code.asc().nullslast(), InventoryItem.name.asc())
     if is_active is not None:
         stmt = stmt.where(InventoryItem.is_active == is_active)
     return list(db.scalars(stmt))
@@ -82,12 +77,7 @@ def search_inventory(
     db: Session = Depends(get_db),
 ) -> list[InventoryItem]:
     """Search inventory by barcode value, item code, or name (for scanner integration)."""
-    stmt = apply_branch_scope(
-        select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast()),
-        InventoryItem,
-        actor,
-        branch_id,
-    )
+    stmt = select(InventoryItem).where(InventoryItem.tenant_id == actor.tenant_id).order_by(InventoryItem.item_code.asc().nullslast())
     if barcode:
         stmt = stmt.where(InventoryItem.barcode_value.ilike(f"%{barcode.strip()}%"))
     if item_code:
@@ -105,7 +95,12 @@ def create_inventory_item(
 ) -> InventoryItem:
     scoped_branch_id = resolve_branch_scope(actor, payload.branch_id)
     if scoped_branch_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="branch_id is required")
+        from backend.app.models import Branch
+        first_branch = db.scalar(select(Branch).where(Branch.tenant_id == actor.tenant_id))
+        if first_branch:
+            scoped_branch_id = first_branch.id
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No branches found in tenant to assign inventory")
     ensure_branch_in_tenant(db, actor.tenant_id, scoped_branch_id)
 
     # Use provided item_code if given, otherwise auto-generate FABxxxx

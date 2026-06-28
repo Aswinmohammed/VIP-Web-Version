@@ -66,12 +66,11 @@ ORDER_CONFIRMATION_TEMPLATE_CONTENT = (
 )
 
 PAYMENT_CONFIRMATION_TEMPLATE_CONTENT = (
-    "Dear {Name}, payment received for order {OrderID}.\n"
-    "Paid now: Rs.{Amount}.\n"
-    "Balance: Rs.{Balance}.\n"
-    "Payment date: {Date}.\n"
-    f"{_contact_details_block()}\n"
-    f"{SMS_FOOTER_LINE}"
+    "Dear {Name},\n"
+    "Thank you for your payment of Rs.{Amount}.\n"
+    "Your remaining balance is Rs.{Balance}.\n"
+    "Order No: {OrderID}\n"
+    "Thank you for choosing VIP Tailors."
 )
 
 DUE_REMINDER_TEMPLATE_CONTENT = (
@@ -107,13 +106,22 @@ LEGACY_TEMPLATE_VARIANTS: dict[str, dict[str, set[str]]] = {
         },
     },
     "payment_confirmation": {
-        "names": {"Payment Confirmation"},
+        "names": {"Payment Confirmation", "Additional Payment Confirmation"},
         "contents": {
             "Payment received for order {OrderID}. Amount: Rs.{Amount}. Remaining balance: Rs.{Balance}. Thank you",
             "Payment received for order {OrderID}. Paid amount: Rs.{Amount}. Remaining balance: Rs.{Balance}. Branch phone: {BranchPhone}.\n\nThank you - VIP Tailors & Fashion Pvt Ltd.",
             "Payment received for order {OrderID}. Paid amount: Rs.{Amount}. Remaining balance: Rs.{Balance}.\n\nThank you - VIP Tailors & Fashion Pvt Ltd.",
             "Dear {Name}, payment received for order {OrderID}.\nPaid now: Rs.{Amount}.\nBalance: Rs.{Balance}.\nPayment date: {Date}.\nFor More Details: Branch Phone Number / {BranchPhone}\nThank you - VIP Tailors & Fashion Pvt Ltd.",
             f"Dear {{Name}}, payment received for order {{OrderID}}.\nPaid now: Rs.{{Amount}}.\nBalance: Rs.{{Balance}}.\nPayment date: {{Date}}.\n{_contact_details_block()}\nThank you - VIP Tailors & Fashion Pvt Ltd.",
+            # Previous default content
+            (
+                "Dear {Name}, payment received for order {OrderID}.\n"
+                "Paid now: Rs.{Amount}.\n"
+                "Balance: Rs.{Balance}.\n"
+                "Payment date: {Date}.\n"
+                f"{_contact_details_block()}\n"
+                f"{SMS_FOOTER_LINE}"
+            ),
             PAYMENT_CONFIRMATION_TEMPLATE_CONTENT,
         },
     },
@@ -145,6 +153,14 @@ LEGACY_TEMPLATE_VARIANTS: dict[str, dict[str, set[str]]] = {
             "Thank you {Name}.\nYour order {OrderID} is fully paid. \nWe appreciate your trust in VIP Tailors.",
             "Dear {Name}, your order {OrderID} is fully paid.\nBalance: Rs.{Balance}.\nFor More Details: Branch Phone Number / {BranchPhone}\nThank you - VIP Tailors & Fashion Pvt Ltd.",
             f"Dear {{Name}}, your order {{OrderID}} is fully paid.\nBalance: Rs.{{Balance}}.\n{_contact_details_block()}\nThank you - VIP Tailors & Fashion Pvt Ltd.",
+            # New full-payment format
+            (
+                "Dear {Name},\n"
+                "Thank you for your payment.\n"
+                "Your order has been fully paid.\n"
+                "Order No: {OrderID}\n"
+                "Thank you for choosing VIP Tailors."
+            ),
         },
     },
 }
@@ -193,11 +209,17 @@ DEFAULT_SMS_TEMPLATES: tuple[dict[str, object], ...] = (
     },
     {
         "code": "thank_you",
-        "name": "Thank You",
+        "name": "Thank You – Full Payment",
         "category": SmsTemplateCategory.TRANSACTIONAL,
         "trigger_event": "full_payment_completed",
-        "is_enabled": False,
-        "content": f"Dear {{Name}}, your order {{OrderID}} is fully paid.\nBalance: Rs.{{Balance}}.\n{_contact_details_block()}\nThank you - VIP Tailors & Fashion Pvt Ltd.",
+        "is_enabled": True,
+        "content": (
+            "Dear {Name},\n"
+            "Thank you for your payment.\n"
+            "Your order has been fully paid.\n"
+            "Order No: {OrderID}\n"
+            "Thank you for choosing VIP Tailors."
+        ),
     },
     {
         "code": "marketing_promo",
@@ -332,7 +354,17 @@ def is_order_ready_status(status: OrderStatus | str) -> bool:
 
 
 def calculate_order_total(order: Order) -> Decimal:
-    items_total = sum((Decimal(item.quantity) * Decimal(item.price_per_unit) for item in order.items), start=Decimal("0.00"))
+    items_total = Decimal("0.00")
+    for item in order.items:
+        cloth_size = Decimal(item.cloth_size) if item.cloth_size is not None else Decimal("0.00")
+        price_per_unit = Decimal(item.price_per_unit) if item.price_per_unit is not None else Decimal("0.00")
+        quantity = Decimal(item.quantity) if item.quantity is not None else Decimal("1.00")
+        stitch_fee = Decimal(item.stitch_fee) if item.stitch_fee is not None else Decimal("0.00")
+        
+        material_cost = cloth_size * price_per_unit * quantity
+        stitch_cost = stitch_fee * quantity
+        items_total += material_cost + stitch_cost
+
     return items_total - Decimal(order.discount or 0)
 
 

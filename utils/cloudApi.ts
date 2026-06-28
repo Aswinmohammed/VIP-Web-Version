@@ -1271,6 +1271,94 @@ export async function fetchCloudOrders(
   return response.map(toOrder);
 }
 
+/**
+ * Server-side order search used by the Orders page.
+ * Applies search, status, and date filters at the database level.
+ * Emergency filter is a pseudo-status (boolean flag) handled client-side after fetch.
+ * Default limit of 150 keeps responses fast while covering all realistic result sets.
+ */
+export async function fetchCloudOrderSearch(
+  token: string,
+  branchId: string | undefined,
+  filters: {
+    statusFilter?: Order['status'] | 'Emergency' | 'All';
+    search?: string;
+    fromDate?: string;
+    toDate?: string;
+    limit?: number;
+  } = {},
+): Promise<Order[]> {
+  // 'Emergency' and 'All' are frontend-only pseudo-statuses; don't send them to the backend
+  const backendStatus =
+    filters.statusFilter && filters.statusFilter !== 'All' && filters.statusFilter !== 'Emergency'
+      ? (filters.statusFilter as Order['status'])
+      : undefined;
+
+  return fetchCloudOrders(token, branchId, {
+    statusFilter: backendStatus,
+    search: filters.search,
+    fromDate: filters.fromDate,
+    toDate: filters.toDate,
+    limit: filters.limit ?? 150,
+  });
+}
+
+/**
+ * Adds a payment to an existing order via the backend API.
+ * The backend automatically:
+ *   - Saves the payment in a committed database transaction
+ *   - Queues a payment confirmation SMS (remaining balance > 0)
+ *   - Queues a thank-you SMS (remaining balance = 0)
+ *   - Prevents duplicate SMS via dedupe_key unique constraint
+ *   - Logs everything to the sms_logs table
+ *
+ * Returns the refreshed Order with updated payments array.
+ */
+export async function addCloudPayment(
+  token: string,
+  orderServerId: string,
+  payment: {
+    amount: number;
+    payment_date: string;  // YYYY-MM-DD
+    method: 'Cash' | 'Card' | 'Bank Transfer' | 'Cheque';
+    note?: string;
+  },
+): Promise<Payment> {
+  type ApiPaymentRead = {
+    id: string;
+    legacy_id?: string | null;
+    order_id: string;
+    branch_id?: string | null;
+    collector_user_id?: string | null;
+    amount: string | number;
+    payment_date: string;
+    method?: string | null;
+    note?: string | null;
+    created_at?: string | null;
+  };
+  const response = await apiRequest<ApiPaymentRead>(`/orders/${orderServerId}/payments`, {
+    method: 'POST',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      amount: payment.amount,
+      payment_date: payment.payment_date,
+      method: payment.method,
+      note: payment.note || null,
+    }),
+  });
+  // Map to frontend Payment type
+  return {
+    id: response.legacy_id || response.id,
+    serverId: response.id,
+    branchId: response.branch_id ?? undefined,
+    collectorId: response.collector_user_id ?? undefined,
+    amount: Number(response.amount),
+    date: response.payment_date,
+    method: (response.method ?? undefined) as Payment['method'],
+    note: response.note ?? '',
+  };
+}
+
 export async function fetchProductionNotifications(
   token: string,
 ): Promise<Array<{ branchId: string; branchName: string; latestOrderNumber: string; count: number }>> {

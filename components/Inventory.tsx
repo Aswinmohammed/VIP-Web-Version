@@ -540,13 +540,6 @@ const Inventory: React.FC = () => {
                 <p className="mt-1 font-bold text-slate-900">Rs. {item.unitPrice.toFixed(2)}</p>
               </div>
             </div>
-            {isAllBranchesScope && (
-              <div className="mt-3">
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-slate-600">
-                  {getBranchName(item.branchId)}
-                </span>
-              </div>
-            )}
           </div>
         )) : (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm italic text-slate-400">
@@ -573,7 +566,6 @@ const Inventory: React.FC = () => {
                 <th className="px-6 py-4">Quantity</th>
                 <th className="px-6 py-4">Unit Price</th>
                 <th className="px-6 py-4">Status</th>
-                {isAllBranchesScope && <th className="px-6 py-4">Branch</th>}
                 <th className="px-6 py-4 text-center print:hidden">Actions</th>
               </tr>
             </thead>
@@ -591,7 +583,6 @@ const Inventory: React.FC = () => {
                       <span className="rounded-full bg-red-100 px-2 py-1 text-red-700 font-bold">Inactive</span>
                     )}
                   </td>
-                  {isAllBranchesScope && <td className="px-6 py-4 font-semibold text-slate-600">{getBranchName(item.branchId)}</td>}
                   <td className="px-6 py-4 print:hidden">
                     <div className="flex justify-center space-x-2">
                       <button onClick={() => handlePrintLabel(item)} className="rounded-lg p-2 text-indigo-600 transition-colors hover:bg-indigo-50" title="Print Label"><Tag size={18} /></button>

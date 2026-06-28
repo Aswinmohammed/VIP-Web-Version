@@ -6,7 +6,7 @@ import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquar
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import DressQuantityTracker from './DressQuantityTracker';
-import { fetchProductionNotifications } from '../utils/cloudApi';
+import { fetchProductionNotifications, fetchCloudOrderSearch } from '../utils/cloudApi';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 
@@ -749,6 +749,10 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  // Server-side search state — null means "no active filter, show context.orders"
+  const [searchResults, setSearchResults] = useState<Order[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [viewingMeasurementsOrder, setViewingMeasurementsOrder] = useState<Order | null>(null);
   const [completedModalOpen, setCompletedModalOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
@@ -770,6 +774,63 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
     return () => window.clearTimeout(timeoutId);
   }, [searchTerm]);
+
+  // ── Server-side search / filter ──────────────────────────────────────────
+  // Fires whenever the debounced search term, status filter, or date range changes.
+  // When all filters are cleared we revert to showing context.orders (no API call).
+  useEffect(() => {
+    const hasActiveFilter =
+      debouncedSearchTerm !== '' ||
+      statusFilter !== 'All' ||
+      fromDate !== '' ||
+      toDate !== '';
+
+    if (!hasActiveFilter) {
+      // No filter active — show global context.orders without an extra API call
+      setSearchResults(null);
+      setSearchError(null);
+      return;
+    }
+
+    if (!accessToken) return;
+
+    // 'Due' navigates to a different page — no search needed here
+    if (statusFilter === 'Due') return;
+
+    let cancelled = false;
+    setIsSearching(true);
+    setSearchError(null);
+
+    const orderDataBranchFilter = (currentUser?.role === 'master_admin' || isAllBranchesScope)
+      ? (activeBranchId === 'all' ? undefined : activeBranchId)
+      : (activeBranchId || undefined);
+
+    fetchCloudOrderSearch(accessToken, orderDataBranchFilter, {
+      // Emergency is a boolean flag — send no status_filter so we get all, then filter client-side
+      statusFilter: statusFilter !== 'Emergency' ? (statusFilter as Order['status'] | 'All') : 'All',
+      search: debouncedSearchTerm || undefined,
+      fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
+    })
+      .then((results) => {
+        if (cancelled) return;
+        // Apply Emergency pseudo-filter client-side
+        const filtered = statusFilter === 'Emergency'
+          ? results.filter((o) => o.emergency)
+          : results;
+        setSearchResults(filtered);
+        setIsSearching(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Order search failed:', err);
+        setSearchError('Search failed. Showing cached results.');
+        setSearchResults(null);
+        setIsSearching(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [debouncedSearchTerm, statusFilter, fromDate, toDate, accessToken, activeBranchId, currentUser, isAllBranchesScope]);
 
   useEffect(() => {
     if (!accessToken || !currentBranch || !currentBranch.accessAreas.includes('orders')) {
@@ -843,9 +904,23 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this order?')) {
-      setOrders(orders.filter(o => o.id !== id));
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this order?')) return;
+    const order = orders.find((o) => o.id === id);
+    if (!order) return;
+    // Optimistic update
+    setOrders(orders.filter((o) => o.id !== id));
+    // Also clear from search results if active
+    setSearchResults((prev) => prev ? prev.filter((o) => o.id !== id) : null);
+    // Persist deletion to backend
+    try {
+      if (context.deleteOrder) {
+        await context.deleteOrder(order);
+      }
+    } catch (e) {
+      console.error('Failed to delete order on server:', e);
+      // Restore the order in local state on failure
+      setOrders((prev) => [order, ...prev]);
     }
   };
 
@@ -987,94 +1062,22 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
 
 
+  // ── Displayed orders ─────────────────────────────────────────────────────
+  // When a search/filter is active: use server-side results (searchResults).
+  // When no filter is active:       fall back to context.orders (full in-memory list).
+  // The sort is maintained from the backend (order_date DESC, created_at DESC).
   const filteredOrders = useMemo(() => {
-    return orders.filter(order => {
-      const orderStatus = String(order.status || '');
-      const orderIdStr = String(order.id || '');
-
-      // ── Status filter (strict match with case insensitivity for robustness) ──
-      const normalizeStatus = (s: string) => s.trim().toLowerCase().replace(/_/g, ' ');
-      
-      if (statusFilter === 'Emergency') {
-        if (!order.emergency) return false;
-      } else if (statusFilter !== 'All') {
-        if (normalizeStatus(orderStatus) !== normalizeStatus(statusFilter)) return false;
-      }
-
-      // ── Date range filter (compare date parts only) ──
-      if (fromDate || toDate) {
-        // Extract YYYY-MM-DD part from ISO strings
-        const orderDateOnly = order.orderDate.split('T')[0];
-        if (fromDate && orderDateOnly < fromDate) return false;
-        if (toDate && orderDateOnly > toDate) return false;
-      }
-
-      // ── Search filter ──
-      const cleanSearch = normalizeSearchText(debouncedSearchTerm);
-      if (cleanSearch) {
-        const searchDigits = cleanSearch.replace(/\D/g, '');
-        const isNumericSearch = searchDigits.length > 0 && !/[a-z]/i.test(cleanSearch);
-
-        // ── Customer Name Search ──
-        const customerName = normalizeSearchText(getCustomerName(order));
-        const namePattern = new RegExp(`(^|\\s)${escapeRegExp(cleanSearch)}`, 'i');
-        const matchesName = !isNumericSearch && namePattern.test(customerName);
-        
-        if (matchesName) {
-          return true;
-        }
-
-        // ── ID Search ──
-        const orderIdNormalized = orderIdStr.trim().toLowerCase();
-        const orderIdCompact = orderIdNormalized.replace(/\s+/g, '');
-        const orderIdDigits = orderIdStr.replace(/\D/g, '');
-        const orderIdStripped = orderIdDigits.replace(/^0+/, '');
-        // Also search order_number if available
-        const orderNumber = String((order as any).orderNumber || '').trim().toLowerCase();
-
-        const searchStrippedZeros = searchDigits.replace(/^0+/, '');
-
-        if (searchDigits) {
-          // Substring match for numeric searches: "14" matches ORD-0014, ORD-14, etc.
-          if (
-            (searchStrippedZeros && orderIdStripped.includes(searchStrippedZeros)) ||
-            (searchDigits && orderIdDigits.includes(searchDigits)) ||
-            orderIdNormalized.includes(cleanSearch) ||
-            orderNumber.includes(cleanSearch)
-          ) {
-            return true;
-          }
-        } else if (
-          orderIdCompact.includes(cleanSearch.replace(/\s+/g, '')) ||
-          orderIdCompact === `ord-${cleanSearch.replace(/\s+/g, '')}` ||
-          orderNumber.includes(cleanSearch)
-        ) {
-          return true;
-        }
-
-        // ── Phone Number Search ──
-        const customerPhone = getCustomerPhone(order);
-        const phoneDigits = customerPhone.replace(/\D/g, '');
-        if (searchDigits.length >= 4 && phoneDigits.includes(searchDigits)) {
-          return true;
-        }
-
-        return false;
-      }
-
-      return true;
-    }).sort((a, b) => {
-      // Sort time-wise: primarily by order date descending, then by order ID descending
+    const source = searchResults ?? orders;
+    return [...source].sort((a, b) => {
       const dateDiff = new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime();
       if (dateDiff !== 0) return dateDiff;
-      
       const getNum = (idStr: string | number) => {
         const match = String(idStr).match(/\d+/);
         return match ? parseInt(match[0], 10) : 0;
       };
       return getNum(b.id) - getNum(a.id);
     });
-  }, [orders, debouncedSearchTerm, statusFilter, fromDate, toDate, getCustomerName, getCustomerPhone]);
+  }, [searchResults, orders]);
 
   const showAddOrderButton = canAccessPage('Add Order');
   const canOpenCutSheet = canUseOrderAction('cut_sheet');
@@ -1212,9 +1215,18 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
               {canDeleteOrder && <button onClick={() => handleDelete(order.id)} className="rounded-lg bg-red-50 p-2 text-red-600" title="Delete"><Trash2 size={18} /></button>}
             </div>
           </div>
-        )) : (
+        )) : isSearching ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center">
+            <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-indigo-400" />
+            <p className="text-sm text-slate-400 italic">Searching orders...</p>
+          </div>
+        ) : (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm italic text-slate-400">
-            No orders found matching your filters.
+            {searchError
+              ? searchError
+              : searchResults !== null
+              ? 'No orders match your search.'
+              : 'No orders found.'}
           </div>
         )}
       </div>
@@ -1314,8 +1326,19 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
                   </td>
                 </tr>
               ))
+            ) : isSearching ? (
+              <tr><td colSpan={7} className="px-6 py-12 text-center">
+                <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-indigo-400" />
+                <p className="text-sm text-slate-400 italic">Searching orders...</p>
+              </td></tr>
             ) : (
-              <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500 italic">No orders found matching your filters.</td></tr>
+              <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500 italic">
+                {searchError
+                  ? searchError
+                  : searchResults !== null
+                  ? 'No orders match your search.'
+                  : 'No orders found matching your filters.'}
+              </td></tr>
             )}
           </tbody>
         </table>
