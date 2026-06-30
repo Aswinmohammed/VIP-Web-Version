@@ -5,6 +5,7 @@ import { Printer, Download, ArrowLeft, Loader2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { downloadDataUri } from '../utils/downloads';
+import { calculateOrderTotals, calculateItemTotal } from '../utils/orderUtils';
 
 interface InvoiceProps {
     orderId: string;
@@ -31,25 +32,21 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
     
     const formatPhoneNumber = (phone: string) => {
         if (!phone) return '';
+    
+    const formatPhoneNumber = (phone: string) => {
+        if (!phone) return '';
         const cleaned = ('' + phone).replace(/\D/g, '');
         const match = cleaned.match(/^(\d{3})(\d{3})(\d{4})$/);
         if (match) return `${match[1]} ${match[2]} ${match[3]}`;
         return phone;
     };
 
-    const itemsTotal = order.items.reduce((sum, item) => {
-        const materialCost = (item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1);
-        const stitchCost = (item.stitchFee || 0) * (item.quantity || 1);
-        return sum + materialCost + stitchCost;
-    }, 0);
-    const discount = order.discount || 0;
-    const grandTotal = Math.max(0, itemsTotal - discount);
-
-    const totalPaid = (order.payments && order.payments.length > 0)
-        ? order.payments.reduce((sum, p) => sum + p.amount, 0)
-        : (order.advance || 0);
-
-    const balance = Math.max(0, grandTotal - totalPaid);
+    const totals = calculateOrderTotals(order);
+    const itemsTotal = totals.itemsTotal;
+    const discount = totals.discount;
+    const grandTotal = totals.finalAmount;
+    const totalPaid = totals.paid;
+    const balance = totals.balance;
 
     const handlePrint = () => {
         window.print();
@@ -274,8 +271,8 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                         <div key={item.id} className="mb-2">
                             <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
                             <div className="flex justify-between text-xs">
-                                <span>{item.quantity} x {(((item.clothSize || 0) * (item.pricePerUnit || 0)) + (item.stitchFee || 0)).toFixed(2)}</span>
-                                <span className="bold">{((((item.clothSize || 0) * (item.pricePerUnit || 0)) + (item.stitchFee || 0)) * (item.quantity || 1)).toFixed(2)}</span>
+                                <span>{item.quantity} x {Math.round(calculateItemTotal({ ...item, quantity: 1 }))}</span>
+                                <span className="bold">{Math.round(calculateItemTotal(item))}</span>
                             </div>
                         </div>
                     ))}
@@ -287,18 +284,18 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                 <div className="text-sm">
                     <div className="flex justify-between">
                         <span>Subtotal:</span>
-                        <span>{itemsTotal.toFixed(2)}</span>
+                        <span>{itemsTotal}</span>
                     </div>
                     {discount > 0 && (
                         <div className="flex justify-between">
                             <span>Discount:</span>
-                            <span>-{discount.toFixed(2)}</span>
+                            <span>-{discount}</span>
                         </div>
                     )}
 
                     <div className="grand-total-section flex justify-between items-center">
                         <span className="bold uppercase text-sm">Net Total:</span>
-                        <span className="bold text-lg">Rs. {grandTotal.toFixed(2)}</span>
+                        <span className="bold text-lg">Rs. {grandTotal}</span>
                     </div>
 
                     <div className="space-y-1 mt-1">
@@ -306,26 +303,26 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                             order.payments.map((p) => (
                                 <div key={p.id} className="flex justify-between text-xs">
                                     <span>Paid ({p.date}):</span>
-                                    <span>{p.amount.toFixed(2)}</span>
+                                    <span>{p.amount}</span>
                                 </div>
                             ))
                         ) : (
                             (order.advance || 0) > 0 && (
                                 <div className="flex justify-between text-xs">
                                     <span>Paid Advance:</span>
-                                    <span>{(order.advance || 0).toFixed(2)}</span>
+                                    <span>{(order.advance || 0)}</span>
                                 </div>
                             )
                         )}
                         <div className="flex justify-between font-bold text-xs pt-1 border-t border-dashed border-gray-400">
                             <span>Total Received:</span>
-                            <span>{totalPaid.toFixed(2)}</span>
+                            <span>{totalPaid}</span>
                         </div>
                     </div>
 
                     <div className="flex justify-between bold border-t border-black pt-1 mt-2 text-md uppercase">
                         <span>Balance Due:</span>
-                        <span>RS. {balance.toFixed(2)}</span>
+                        <span>RS. {balance}</span>
                     </div>
                 </div>
 

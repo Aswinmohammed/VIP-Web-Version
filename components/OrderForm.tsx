@@ -4,6 +4,7 @@ import { AppContext } from '../context/AppContext';
 import { Order, OrderItem, Measurement, Page, DEFAULT_MEASUREMENTS, DressType, Payment, Customer } from '../types';
 import { PlusCircle, Trash2, Save, XCircle, Ruler, Calculator, FileText, Search, ChevronRight, ChevronDown, UserPlus, History, Clock, Scan, Scissors } from 'lucide-react';
 import CustomerForm from './CustomerForm';
+import { calculateOrderTotals } from '../utils/orderUtils';
 
 interface OrderFormProps {
   orderId?: string | null;
@@ -694,25 +695,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     }
   };
 
-  // Correct business formula: ((clothSize × pricePerUnit) × quantity) + (stitchFee × quantity)
-  const grandTotal = useMemo(() => {
-    return order.items.reduce(
-      (total, item) => {
-        const materialCost = (item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1);
-        return total + materialCost + ((item.stitchFee || 0) * (item.quantity || 1));
-      },
-      0
-    );
-  }, [order.items]);
+  const { itemsTotal: grandTotal, finalAmount: roundedFinalAmount, paid: totalPaid, balance } = useMemo(() => {
+    return calculateOrderTotals(order);
+  }, [order]);
 
   const totalStitchFee = useMemo(() => {
     return order.items.reduce((sum, item) => sum + ((item.stitchFee || 0) * (item.quantity || 1)), 0);
   }, [order.items]);
-
-  const finalAmount = Math.max(0, grandTotal - (order.discount || 0));
-  const roundedFinalAmount = Math.round(finalAmount / 50) * 50;
-  const totalPaid = (order.payments || []).reduce((sum, p) => sum + p.amount, 0);
-  const balance = roundedFinalAmount - totalPaid;
 
   return (
     <div className="p-4 sm:p-6 bg-white rounded-lg shadow-md">

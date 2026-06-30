@@ -5,6 +5,7 @@ import { Phone, Edit, DollarSign, X, Search, Filter, Printer, Download, Loader2,
 import { jsPDF } from 'jspdf';
 import { sendCloudOrderSms, addCloudPayment } from '../utils/cloudApi';
 import { downloadDataUri } from '../utils/downloads';
+import { calculateOrderTotals } from '../utils/orderUtils';
 
 const OWNER_CONTACT_PHONE = '077 777 0811';
 const OWNER_CONTACT_INDENT = '                             ';
@@ -490,12 +491,8 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
   };
 
   const computeFinal = (o: Order) => {
-    const itemsTotal = o.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
-    const discount = Number((o as any).discount) || 0;
-    const final = Math.max(0, itemsTotal - discount);
-    const paid = (o.payments || []).reduce((s, p) => s + p.amount, 0) || (o.advance || 0);
-    const balance = Math.max(0, final - paid);
-    return { final, paid, balance };
+    const totals = calculateOrderTotals(o);
+    return { final: totals.finalAmount, paid: totals.paid, balance: totals.balance };
   };
 
   const dueOrders = useMemo(() => {
@@ -579,11 +576,8 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
         if (o.id !== selectedOrder.id) return o;
 
         const updatedPayments = [...(o.payments || []), newPayment];
-        const itemsTotal = o.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
-        const discount = Number((o as any).discount) || 0;
-        const final = Math.max(0, itemsTotal - discount);
-        const totalPaid = updatedPayments.reduce((s, p) => s + p.amount, 0);
-        const newBalance = Math.max(0, final - totalPaid);
+        const totals = calculateOrderTotals({ ...o, payments: updatedPayments });
+        const newBalance = totals.balance;
 
         const newStatus: Order['status'] = newBalance === 0 ? 'Delivered' : 'Due';
 

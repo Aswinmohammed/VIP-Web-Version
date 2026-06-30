@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { jsPDF } from 'jspdf';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
+import { calculateOrderTotals } from '../utils/orderUtils';
 
 interface DashboardProps {
   navigate: (page: Page, orderId?: string) => void;
@@ -159,11 +160,8 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   // Outstanding for today's orders
   const todaysOutstanding = useMemo(() => {
     return todaysOrders.reduce((sum, order) => {
-      const total = order.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
-      const discount = Number(order.discount) || 0;
-      const final = Math.max(0, total - discount);
-      const paid = (order.payments || []).reduce((s, p) => s + p.amount, 0) || (order.advance || 0);
-      return sum + Math.max(0, final - paid);
+      const totals = calculateOrderTotals(order);
+      return sum + totals.balance;
     }, 0);
   }, [todaysOrders]);
 
@@ -462,9 +460,8 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   const salesData = useMemo(() => {
     const monthsData = orders.reduce((acc, order) => {
       const month = new Date(order.orderDate).toLocaleString('default', { month: 'short' });
-      const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0);
-      const finalAmount = Math.max(0, itemsTotal - (order.discount || 0));
-      acc[month] = (acc[month] || 0) + finalAmount;
+      const totals = calculateOrderTotals(order);
+      acc[month] = (acc[month] || 0) + totals.finalAmount;
       return acc;
     }, {} as Record<string, number>);
     return Object.entries(monthsData).map(([name, sales]) => ({ name, sales })).slice(-6);
@@ -547,8 +544,8 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
           </h2>
           <div className="space-y-4">
             {recentOrders.map(order => {
-              const itemsTotal = order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0);
-              const finalAmount = Math.max(0, itemsTotal - (order.discount || 0));
+              const totals = calculateOrderTotals(order);
+              const finalAmount = totals.finalAmount;
               return (
                 <div key={order.id} className="flex items-center justify-between group p-3 hover:bg-slate-50 rounded-lg transition-all border border-transparent hover:border-slate-100">
                   <div>

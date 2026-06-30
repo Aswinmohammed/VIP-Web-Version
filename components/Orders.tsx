@@ -9,6 +9,7 @@ import DressQuantityTracker from './DressQuantityTracker';
 import { fetchProductionNotifications, fetchCloudOrderSearch } from '../utils/cloudApi';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
+import { calculateOrderTotals } from '../utils/orderUtils';
 
 interface OrdersProps {
   navigate: (page: Page, orderId?: string) => void;
@@ -335,12 +336,8 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
     };
 
   const computeFinal = (o: Order) => {
-    const itemsTotal = o.items.reduce((s, i) => s + i.quantity * i.pricePerUnit, 0);
-    const discount = Number((o as any).discount) || 0;
-    const final = Math.max(0, itemsTotal - discount);
-    const paid = (o.payments || []).reduce((s, p) => s + p.amount, 0) || (o.advance || 0);
-    const balance = Math.max(0, final - paid);
-    return { final, paid, balance };
+    const totals = calculateOrderTotals(o);
+    return { final: totals.finalAmount, paid: totals.paid, balance: totals.balance };
   };
 
   const handleMarkDelivered = async (orderId: string) => {
