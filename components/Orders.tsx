@@ -476,11 +476,11 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
 
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(9);
-        pdf.text(c.final.toLocaleString(), margin + 120, yPos + 6);
+        pdf.text(c.final.toFixed(2), margin + 120, yPos + 6);
 
         pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(234, 88, 12); // orange-600
-        pdf.text(c.balance.toLocaleString(), margin + 145, yPos + 6);
+        pdf.text(c.balance.toFixed(2), margin + 145, yPos + 6);
 
         pdf.setTextColor(31, 41, 55);
         pdf.setFont('helvetica', 'italic');
@@ -505,12 +505,12 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(31, 41, 55);
       pdf.text('Grand Total:', margin + 110, yPos);
-      pdf.text(`Rs. ${sumTotal.toLocaleString()}`, pageWidth - margin - 3, yPos, { align: 'right' });
+      pdf.text(`Rs. ${sumTotal.toFixed(2)}`, pageWidth - margin - 3, yPos, { align: 'right' });
       
       yPos += 6;
       pdf.text('Total Balance:', margin + 110, yPos);
       pdf.setTextColor(234, 88, 12);
-      pdf.text(`Rs. ${sumBalance.toLocaleString()}`, pageWidth - margin - 3, yPos, { align: 'right' });
+      pdf.text(`Rs. ${sumBalance.toFixed(2)}`, pageWidth - margin - 3, yPos, { align: 'right' });
 
       // Footer
       const totalPages = pdf.internal.pages.length - 1;
@@ -630,8 +630,8 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                       )}
                     </td>
                     <td className="px-4 py-4 font-mono text-xs text-gray-500">{o.id}</td>
-                    <td className="px-4 py-4 text-right font-semibold text-gray-600">Rs. {c.final.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-right text-orange-600 font-black italic">Rs. {c.balance.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-right font-semibold text-gray-600">Rs. {c.final.toFixed(2)}</td>
+                    <td className="px-4 py-4 text-right text-orange-600 font-black italic">Rs. {c.balance.toFixed(2)}</td>
                     <td className="px-4 py-4 text-center">
                       <div className="flex flex-col items-center">
                         <span className={getStatusChip(o.status)}>{o.status}</span>
@@ -716,11 +716,11 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                   </div>
                   <div className="flex justify-between text-sm mt-1">
                     <span>Total Amnt:</span>
-                    <span>Rs. {c.final.toLocaleString()}</span>
+                    <span>Rs. {c.final.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-md bold">
-                    <span>BALANCE DUE:</span>
-                    <span>Rs. {c.balance.toLocaleString()}</span>
+                  <div className="flex justify-between text-sm bold text-orange-700">
+                    <span>Balance:</span>
+                    <span>Rs. {c.balance.toFixed(2)}</span>
                   </div>
                 </div>
               );
@@ -1190,7 +1190,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
               </div>
               <div className="rounded-xl bg-slate-50 p-3">
                 <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Total</p>
-                <p className="mt-1 font-bold text-slate-900">Rs. {order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()}</p>
+                <p className="mt-1 font-bold text-slate-900">Rs. {calculateOrderTotals(order).finalAmount.toFixed(2)}</p>
               </div>
               <div className="rounded-xl bg-slate-50 p-3">
                 <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Bag Count</p>
@@ -1264,7 +1264,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
                   </td>
                   <td className="px-6 py-4 text-gray-500">{order.orderDate}</td>
                   <td className="px-6 py-4 text-gray-500">{order.dueDate || '-'}{order.emergency && <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">Emergency</span>}</td>
-                  <td className="px-6 py-4 font-bold text-gray-900">Rs. {order.items.reduce((sum, item) => sum + item.quantity * item.pricePerUnit, 0).toLocaleString()}</td>
+                  <td className="px-6 py-4 font-bold text-gray-900">Rs. {calculateOrderTotals(order).finalAmount.toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       {canFilterProductionStatuses && (order.status === 'Completed' || order.status === 'Packed') ? (

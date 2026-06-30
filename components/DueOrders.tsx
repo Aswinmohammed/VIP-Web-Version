@@ -36,7 +36,7 @@ const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, comp
       return;
     }
     if (numAmount > balance) {
-      alert(`Amount cannot exceed due balance of Rs. ${balance.toLocaleString()}`);
+      alert(`Amount cannot exceed due balance of Rs. ${balance.toFixed(2)}`);
       return;
     }
     await onSubmit(numAmount, date, method, note);
@@ -69,7 +69,7 @@ const CollectionModal: React.FC<CollectionModalProps> = ({ order, customer, comp
 
           <div className="bg-red-50 p-4 rounded-xl border border-red-100">
             <p className="text-xs font-bold text-red-700 uppercase tracking-wider mb-1">Total Due</p>
-            <p className="text-3xl font-black text-red-600">Rs. {balance.toLocaleString()}</p>
+            <p className="text-3xl font-black text-red-600">Rs. {balance.toFixed(2)}</p>
           </div>
 
           <div className="space-y-3">
@@ -240,7 +240,7 @@ const DueSmsModal: React.FC<DueSmsModalProps> = ({
               <div className="flex items-center text-blue-700 font-semibold">
                 <Phone size={16} className="mr-2" /> {branchPhone}
               </div>
-              <p className="text-xs text-blue-700">Due Balance: Rs. {balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-blue-700">Due Balance: Rs. {balance.toFixed(2)}</p>
             </div>
           </div>
 
@@ -350,7 +350,7 @@ const DueListModal: React.FC<DueListModalProps> = ({ onClose, dueOrders, custome
                       <Phone size={14} className="mr-2" /> {formatPhoneNumber(cust?.phone)}
                     </td>
                     <td className="px-4 py-4 text-right font-semibold text-gray-600">Rs. {c.final.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-right text-red-600 font-black italic">Rs. {c.balance.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-right text-red-600 font-black italic">Rs. {c.balance.toFixed(2)}</td>
                     <td className="px-4 py-4 text-gray-400 italic text-xs">{o.orderDate}</td>
                   </tr>
                 );
@@ -414,7 +414,7 @@ const DueListModal: React.FC<DueListModalProps> = ({ onClose, dueOrders, custome
                   </div>
                   <div className="flex justify-between text-md bold">
                     <span>DUE BALANCE:</span>
-                    <span>Rs. {c.balance.toLocaleString()}</span>
+                    <span>Rs. {c.balance.toFixed(2)}</span>
                   </div>
                 </div>
               );
@@ -464,11 +464,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
   const getBranchName = (order: Order) => order.branchName || branches.find(branch => branch.id === order.branchId)?.name || 'Current Branch';
   const getBranchPhone = (order: Order) => formatPhoneNumber(order.branchPhone || branches.find(branch => branch.id === order.branchId)?.phone);
 
-  const formatSmsAmount = (amount: number) =>
-    amount.toLocaleString('en-LK', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const formatSmsAmount = (amount: number) => amount.toFixed(2);
 
   const extractErrorMessage = (error: unknown) => {
     if (!(error instanceof Error)) {
@@ -667,7 +663,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
         pdf.text(c.final.toLocaleString(), margin + 115, yPos + 7.5);
         pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(220, 38, 38);
-        pdf.text(c.balance.toLocaleString(), margin + 145, yPos + 7.5);
+        pdf.text(c.balance.toFixed(2), margin + 145, yPos + 7.5);
         pdf.setTextColor(156, 163, 175);
         pdf.setFont('helvetica', 'italic');
         pdf.setFontSize(8);
@@ -703,7 +699,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
         </div>
         <div className="mt-4 sm:mt-0 px-4 py-2 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm text-red-600 font-semibold">Total Due: <span className="text-xl font-black text-red-700">Rs. {dueOrders.reduce((sum, o) => sum + computeFinal(o).balance, 0).toLocaleString()}</span></p>
+            <p className="text-sm text-red-600 font-semibold">Total Due: <span className="text-xl font-black text-red-700">Rs. {dueOrders.reduce((sum, o) => sum + computeFinal(o).balance, 0).toFixed(2)}</span></p>
           </div>
           <button
             onClick={() => setDueListModalOpen(true)}
@@ -750,7 +746,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
                       <Phone size={14} className="mr-2" /> {getCustomerPhone(order.customerId)}
                     </td>
                     <td className="px-6 py-4 font-semibold text-gray-700 text-right">Rs. {final.toLocaleString()}</td>
-                    <td className="px-6 py-4 font-black text-red-600 text-right">Rs. {balance.toLocaleString()}</td>
+                    <td className="px-6 py-4 font-black text-red-600 text-right">Rs. {balance.toFixed(2)}</td>
                     <td className="px-6 py-4 text-gray-500 text-xs">{order.orderDate}</td>
                     <td className="px-6 py-4 flex justify-center space-x-2">
                       <button

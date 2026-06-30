@@ -268,8 +268,8 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                         <div key={item.id} className="mb-2">
                             <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
                             <div className="flex justify-between text-xs">
-                                <span>{item.quantity} x {Math.round(calculateItemTotal({ ...item, quantity: 1 }))}</span>
-                                <span className="bold">{Math.round(calculateItemTotal(item))}</span>
+                                <span>{item.quantity} x {calculateItemTotal({ ...item, quantity: 1 }).toFixed(2)}</span>
+                                <span className="bold">{calculateItemTotal(item).toFixed(2)}</span>
                             </div>
                         </div>
                     ))}
@@ -281,18 +281,18 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                 <div className="text-sm">
                     <div className="flex justify-between">
                         <span>Subtotal:</span>
-                        <span>{itemsTotal}</span>
+                        <span>{itemsTotal.toFixed(2)}</span>
                     </div>
                     {discount > 0 && (
                         <div className="flex justify-between">
                             <span>Discount:</span>
-                            <span>-{discount}</span>
+                            <span>-{discount.toFixed(2)}</span>
                         </div>
                     )}
 
                     <div className="grand-total-section flex justify-between items-center">
                         <span className="bold uppercase text-sm">Net Total:</span>
-                        <span className="bold text-lg">Rs. {grandTotal}</span>
+                        <span className="bold text-lg">Rs. {grandTotal.toFixed(2)}</span>
                     </div>
 
                     <div className="space-y-1 mt-1">
@@ -300,26 +300,26 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                             order.payments.map((p) => (
                                 <div key={p.id} className="flex justify-between text-xs">
                                     <span>Paid ({p.date}):</span>
-                                    <span>{p.amount}</span>
+                                    <span>{p.amount.toFixed(2)}</span>
                                 </div>
                             ))
                         ) : (
                             (order.advance || 0) > 0 && (
                                 <div className="flex justify-between text-xs">
                                     <span>Paid Advance:</span>
-                                    <span>{(order.advance || 0)}</span>
+                                    <span>{(order.advance || 0).toFixed(2)}</span>
                                 </div>
                             )
                         )}
                         <div className="flex justify-between font-bold text-xs pt-1 border-t border-dashed border-gray-400">
                             <span>Total Received:</span>
-                            <span>{totalPaid}</span>
+                            <span>{totalPaid.toFixed(2)}</span>
                         </div>
                     </div>
 
                     <div className="flex justify-between bold border-t border-black pt-1 mt-2 text-md uppercase">
                         <span>Balance Due:</span>
-                        <span>RS. {balance}</span>
+                        <span>RS. {balance.toFixed(2)}</span>
                     </div>
                 </div>
 
