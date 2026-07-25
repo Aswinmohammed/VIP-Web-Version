@@ -1,7 +1,11 @@
+import io
 import json
+import logging
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
+
+import pytest
 
 from backend.app.services import sms as sms_service
 from backend.app.dependencies import AuthenticatedActor
@@ -181,14 +185,83 @@ def test_send_via_gateway_uses_intech_header_and_payload(monkeypatch) -> None:
 
     provider_message_id, parsed = send_via_gateway(settings, "94778514532", "Hello World!")
 
+    captured_headers = {key.lower(): value for key, value in captured["headers"].items()}
     assert provider_message_id == "msg-123"
     assert parsed["message_id"] == "msg-123"
-    assert captured["headers"]["X-api-key"] == "abc123"
+    assert captured_headers["user-agent"] == "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    assert captured_headers["content-type"] == "application/json"
+    assert captured_headers["accept"] == "application/json"
+    assert captured_headers["authorization"] == "Bearer abc123"
+    assert captured_headers["x-api-key"] == "abc123"
     assert captured["body"] == {
         "sender_id": "VIPTAILOR",
         "message": "Hello World!",
         "recipients": ["94778514532"],
     }
+
+
+def test_send_via_gateway_rejects_missing_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("VIP_SMS_API_KEY", raising=False)
+    monkeypatch.setattr("backend.app.services.sms._load_env_file_values", lambda: {"VIP_SMS_API_KEY": ""})
+
+    settings = SimpleNamespace(
+        provider_name="Intech SMS",
+        api_base_url="https://sms.intechitsolutions.com/api/send",
+        sender_id="VIPTAILOR",
+        api_key_ref="env:VIP_SMS_API_KEY",
+    )
+
+    with pytest.raises(ValueError, match="SMS API key reference 'env:VIP_SMS_API_KEY' could not be resolved"):
+        send_via_gateway(settings, "94778514532", "Hello World!")
+
+
+def test_send_via_gateway_rejects_missing_sender_id(monkeypatch) -> None:
+    monkeypatch.setattr("backend.app.services.sms.request.urlopen", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("backend.app.services.sms._resolve_api_key", lambda _ref: "abc123")
+
+    settings = SimpleNamespace(
+        provider_name="Intech SMS",
+        api_base_url="https://sms.intechitsolutions.com/api/send",
+        sender_id="  ",
+        api_key_ref="env:VIP_SMS_API_KEY",
+    )
+
+    with pytest.raises(ValueError, match="SMS sender ID is not configured"):
+        send_via_gateway(settings, "94778514532", "Hello World!")
+
+
+def test_send_via_gateway_logs_http_error_details_with_redacted_headers(monkeypatch, caplog) -> None:
+    def fake_urlopen(req, timeout=20):
+        raise sms_service.error.HTTPError(
+            req.full_url,
+            1010,
+            "Cloudflare WAF blocked request",
+            hdrs=None,
+            fp=io.BytesIO(b'{"error":"code 1010 blocked"}'),
+        )
+
+    monkeypatch.setattr("backend.app.services.sms.request.urlopen", fake_urlopen)
+    monkeypatch.delenv("VIP_SMS_API_KEY", raising=False)
+    monkeypatch.setattr("backend.app.services.sms._load_env_file_values", lambda: {"VIP_SMS_API_KEY": "abc123"})
+
+    settings = SimpleNamespace(
+        provider_name="Intech SMS",
+        api_base_url="https://sms.intechitsolutions.com/api/send",
+        sender_id="VIPTAILOR",
+        api_key_ref="env:VIP_SMS_API_KEY",
+    )
+
+    with caplog.at_level(logging.ERROR, logger="vip_tailors.sms"):
+        with pytest.raises(RuntimeError, match="code 1010 blocked"):
+            send_via_gateway(settings, "94778514532", "Hello World!")
+
+    log_output = caplog.text
+    assert "status_code=1010" in log_output
+    assert '{"error":"code 1010 blocked"}' in log_output
+    assert "request_headers=" in log_output
+    assert "[REDACTED]" in log_output
+    assert "abc123" not in log_output
+    assert "Bearer abc123" not in log_output
 
 
 def test_resolve_api_key_reads_dotenv_values_when_os_env_is_missing(monkeypatch) -> None:

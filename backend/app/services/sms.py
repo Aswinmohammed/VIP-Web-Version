@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -34,6 +35,8 @@ from backend.app.schemas import SmsCampaignAudienceFilter, SmsCampaignPreviewRec
 if TYPE_CHECKING:
     from backend.app.dependencies import AuthenticatedActor
     from backend.app.schemas import SmsCampaignCreate, SmsCampaignLaunchRequest, SmsManualSendRequest, SmsOrderManualSendRequest
+
+logger = logging.getLogger("vip_tailors.sms")
 
 
 SMS_TEMPLATE_VARIABLES = ("Name", "OrderID", "Amount", "PaidAmount", "Balance", "Date", "BranchName", "BranchPhone")
@@ -595,21 +598,45 @@ def _get_default_sms_branch_id(db: Session, tenant_id) -> Any | None:
     )
 
 
+def _sanitize_sms_headers(headers: dict[str, str]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for key, value in headers.items():
+        normalized_key = key.lower()
+        if normalized_key in {"authorization", "x-api-key"} or any(
+            secret_fragment in normalized_key for secret_fragment in ("key", "token", "secret")
+        ):
+            sanitized[key] = "[REDACTED]"
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 def send_via_gateway(settings: SmsSettings, phone_normalized: str, message: str) -> tuple[str | None, dict[str, Any]]:
-    if not settings.api_base_url:
+    api_base_url = (settings.api_base_url or "").strip()
+    if not api_base_url:
         raise ValueError("SMS gateway URL is not configured.")
 
-    headers = {"Content-Type": "application/json"}
+    sender_id = (settings.sender_id or "").strip()
+    if not sender_id:
+        raise ValueError("SMS sender ID is not configured.")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
     api_key = _resolve_api_key(settings.api_key_ref)
     if settings.api_key_ref and not api_key:
         raise ValueError(
             f"SMS API key reference '{settings.api_key_ref}' could not be resolved. "
             "Set the matching environment variable or update the SMS settings."
         )
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     if _uses_intech_gateway(settings):
         payload = {
-            "sender_id": settings.sender_id,
+            "sender_id": sender_id,
             "message": message,
             "recipients": [phone_normalized],
         }
@@ -619,17 +646,16 @@ def send_via_gateway(settings: SmsSettings, phone_normalized: str, message: str)
         payload = {
             "to": phone_normalized,
             "message": message,
-            "sender_id": settings.sender_id,
+            "sender_id": sender_id,
         }
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
 
     req = request.Request(
-        settings.api_base_url,
+        api_base_url,
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",
     )
+    sanitized_headers = _sanitize_sms_headers(dict(req.header_items()))
 
     try:
         with request.urlopen(req, timeout=20) as response:
@@ -637,7 +663,19 @@ def send_via_gateway(settings: SmsSettings, phone_normalized: str, message: str)
             parsed = json.loads(response_body) if response_body else {}
     except error.HTTPError as exc:
         response_body = exc.read().decode("utf-8")
+        logger.error(
+            "SMS gateway HTTP error. status_code=%s request_headers=%s response_text=%s",
+            exc.code,
+            sanitized_headers,
+            response_body,
+        )
         raise RuntimeError(response_body or str(exc)) from exc
+    except Exception:
+        logger.exception(
+            "SMS gateway request failed. request_headers=%s",
+            sanitized_headers,
+        )
+        raise
 
     provider_message_id = None
     for candidate_key in ("message_id", "id", "sid", "reference"):
