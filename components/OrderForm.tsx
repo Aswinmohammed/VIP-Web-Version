@@ -130,6 +130,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     date: new Date().toISOString().split('T')[0],
     method: 'Cash'
   });
+  const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>('amount');
+  const [discountInput, setDiscountInput] = useState('0');
 
   const [historicalMeasurements, setHistoricalMeasurements] = useState<Record<string, { measurements: Measurement[], note?: string }>>({});
 
@@ -185,6 +187,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
       advance: existingOrder.advance || 0,
       payments: currentPayments
     });
+    setDiscountMode('amount');
+    setDiscountInput(String(existingOrder.discount || 0));
     hydratedOrderIdRef.current = existingOrder.id;
     isDirtyRef.current = false;
 
@@ -225,6 +229,50 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     setOrder(prev => ({
       ...prev,
       [name]: type === 'number' ? parseFloat(value) || 0 : value
+    }));
+  };
+
+  const getItemsTotal = (items: OrderItem[]) => {
+    return items.reduce((sum, item) => sum + (((item.clothSize || 0) * (item.pricePerUnit || 0) * (item.quantity || 1)) + ((item.stitchFee || 0) * (item.quantity || 1))), 0);
+  };
+
+  const calculateDiscountAmount = (rawValue: string, mode: 'amount' | 'percent', items: OrderItem[] = order.items) => {
+    const numericValue = Math.max(0, parseFloat(rawValue) || 0);
+    const itemsTotal = getItemsTotal(items);
+    if (mode === 'percent') {
+      return Math.min(itemsTotal, (itemsTotal * Math.min(numericValue, 100)) / 100);
+    }
+    return Math.min(itemsTotal, numericValue);
+  };
+
+  const handleDiscountInputChange = (value: string) => {
+    setDiscountInput(value);
+    markDirty();
+    setOrder(prev => ({
+      ...prev,
+      discount: calculateDiscountAmount(value, discountMode, prev.items)
+    }));
+  };
+
+  const handleDiscountModeChange = (mode: 'amount' | 'percent') => {
+    if (mode === discountMode) {
+      return;
+    }
+
+    const itemsTotal = getItemsTotal(order.items);
+    const currentDiscount = Number(order.discount) || 0;
+    const nextInput = mode === 'percent'
+      ? itemsTotal > 0
+        ? ((currentDiscount / itemsTotal) * 100).toFixed(2).replace(/\.?0+$/, '')
+        : '0'
+      : currentDiscount.toFixed(2).replace(/\.?0+$/, '');
+
+    setDiscountMode(mode);
+    setDiscountInput(nextInput || '0');
+    markDirty();
+    setOrder(prev => ({
+      ...prev,
+      discount: calculateDiscountAmount(nextInput || '0', mode, prev.items)
     }));
   };
 
@@ -288,6 +336,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
       advance: 0,
       payments: []
     }));
+    setDiscountMode('amount');
+    setDiscountInput(String(oldOrder.discount || 0));
     setCustomerSearch(customer.name);
     setShowCustomerDropdown(false);
   };
@@ -614,6 +664,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         navigate('Orders');
       } else {
         setOrder(initialOrderState);
+        setDiscountMode('amount');
+        setDiscountInput('0');
         setCustomerSearch('');
         setNewPayment({ amount: '', date: new Date().toISOString().split('T')[0], method: 'Cash' });
         isDirtyRef.current = false;
@@ -698,6 +750,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const { itemsTotal: grandTotal, finalAmount: roundedFinalAmount, paid: totalPaid, balance } = useMemo(() => {
     return calculateOrderTotals(order);
   }, [order]);
+
+  useEffect(() => {
+    if (discountMode !== 'percent') {
+      return;
+    }
+    const nextDiscount = calculateDiscountAmount(discountInput, 'percent', order.items);
+    if (Math.abs(nextDiscount - (Number(order.discount) || 0)) < 0.01) {
+      return;
+    }
+    setOrder(prev => ({ ...prev, discount: nextDiscount }));
+  }, [discountMode, discountInput, order.items, order.discount]);
 
   const totalStitchFee = useMemo(() => {
     return order.items.reduce((sum, item) => sum + ((item.stitchFee || 0) * (item.quantity || 1)), 0);
@@ -1068,8 +1131,39 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
           <div className="flex-1 p-6 border rounded-lg bg-gray-50 h-fit">
             <div className="flex items-center mb-4"><Calculator className="w-5 h-5 text-gray-500 mr-2" /><h2 className="text-xl font-semibold">Payment Details</h2></div>
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700">Discount (Rs.)</label>
-              <input type="number" name="discount" value={order.discount} onChange={handleOrderChange} min="0" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-primary-500 focus:border-primary-500" />
+              <label className="block text-sm font-medium text-gray-700">Discount ({discountMode === 'percent' ? '%' : 'Rs.'})</label>
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="number"
+                  value={discountInput}
+                  onChange={(event) => handleDiscountInputChange(event.target.value)}
+                  min="0"
+                  max={discountMode === 'percent' ? 100 : undefined}
+                  step="0.01"
+                  className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-primary-500 focus:border-primary-500"
+                />
+                <div className="inline-flex h-11 shrink-0 overflow-hidden rounded-md border-2 border-slate-900 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => handleDiscountModeChange('amount')}
+                    className={`w-16 border-r-2 border-slate-900 text-sm font-black ${discountMode === 'amount' ? 'bg-slate-900 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'}`}
+                  >
+                    Rs.
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDiscountModeChange('percent')}
+                    className={`w-16 text-lg font-black ${discountMode === 'percent' ? 'bg-slate-900 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'}`}
+                  >
+                    %
+                  </button>
+                </div>
+              </div>
+              {discountMode === 'percent' && (
+                <p className="mt-2 text-xs font-semibold text-slate-500">
+                  Discount calculated: Rs. {(order.discount || 0).toFixed(2)}
+                </p>
+              )}
             </div>
             <div className="border-t border-gray-200 pt-4">
               <h3 className="text-sm font-medium text-gray-700 mb-3">Payment History</h3>

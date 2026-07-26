@@ -285,7 +285,15 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                     </div>
                     {discount > 0 && (
                         <div className="flex justify-between">
-                            <span>Discount:</span>
+                            <span>
+                                Discount
+                                {(() => {
+                                    const pct = (discount / itemsTotal) * 100;
+                                    const isExactPct = Math.abs(pct - Math.round(pct)) < 0.01;
+                                    return isExactPct && Math.round(pct) > 0 ? ` (${Math.round(pct)}%)` : '';
+                                })()}
+                                :
+                            </span>
                             <span>-{discount.toFixed(2)}</span>
                         </div>
                     )}

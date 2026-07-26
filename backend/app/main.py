@@ -1,7 +1,8 @@
+import asyncio
 import json
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from pydantic import BaseModel
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -14,9 +15,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
-from backend.app.database import engine, get_db
+from backend.app.database import SessionLocal, engine, get_db
 from backend.app.models import Base, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
 from backend.app.services.files import save_json_backup, save_pdf_export
+from backend.app.services.sms import process_sms_queue
 from backend.app.dependencies import AuthenticatedActor, get_current_actor
 from sqlalchemy import event
 
@@ -831,6 +833,23 @@ def ensure_order_constraints_and_indexes() -> None:
                 print(f"[startup] Constraint/Index statement warning: {e}")
 
 
+
+async def run_sms_queue_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            with SessionLocal() as db:
+                processed = process_sms_queue(db)
+                if processed:
+                    db.commit()
+                else:
+                    db.rollback()
+        except Exception:
+            logger.exception("SMS queue worker failed")
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            pass
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
@@ -850,7 +869,15 @@ async def lifespan(_: FastAPI):
     ensure_sms_support_columns()
     ensure_inventory_and_order_material_columns()
     ensure_order_constraints_and_indexes()
-    yield
+    sms_worker_stop = asyncio.Event()
+    sms_worker_task = asyncio.create_task(run_sms_queue_worker(sms_worker_stop))
+    try:
+        yield
+    finally:
+        sms_worker_stop.set()
+        sms_worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sms_worker_task
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)

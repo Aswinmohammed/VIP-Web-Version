@@ -525,16 +525,21 @@ def _parse_optional_time(value: str | None, fallback: time) -> time:
 def next_allowed_marketing_time(settings: SmsSettings, current_time: datetime) -> datetime:
     quiet_start = _parse_optional_time(settings.quiet_hours_start, time(9, 0))
     quiet_end = _parse_optional_time(settings.quiet_hours_end, time(19, 0))
-    current_local_time = current_time.timetz().replace(tzinfo=None)
+    
+    # Assume IST timezone (+5:30) for quiet hours logic since the business operates in India
+    tz_ist = timezone(timedelta(hours=5, minutes=30))
+    local_time = current_time.astimezone(tz_ist)
+    current_local_time = local_time.time()
 
     if quiet_start <= current_local_time <= quiet_end:
         return current_time
 
-    next_time = current_time
+    next_local_time = local_time
     if current_local_time > quiet_end:
-        next_time = current_time + timedelta(days=1)
+        next_local_time = local_time + timedelta(days=1)
 
-    return next_time.replace(hour=quiet_start.hour, minute=quiet_start.minute, second=0, microsecond=0)
+    next_local_time = next_local_time.replace(hour=quiet_start.hour, minute=quiet_start.minute, second=0, microsecond=0)
+    return next_local_time.astimezone(timezone.utc)
 
 
 def _resolve_api_key(ref: str | None) -> str | None:

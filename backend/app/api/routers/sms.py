@@ -59,6 +59,20 @@ def _log_scope_stmt(actor: AuthenticatedActor):
     return stmt
 
 
+
+def _dispatch_campaign_logs(db: Session, campaign_id: uuid.UUID) -> None:
+    queued_log_ids = list(
+        db.scalars(
+            select(SmsLog.id).where(
+                SmsLog.campaign_id == campaign_id,
+                SmsLog.status == SmsLogStatus.QUEUED,
+            )
+        )
+    )
+    if queued_log_ids:
+        dispatch_sms_logs_now(db, queued_log_ids)
+
+
 def _get_sms_order_or_404(actor: AuthenticatedActor, db: Session, order_id: uuid.UUID) -> Order:
     stmt = (
         select(Order)
@@ -302,6 +316,7 @@ def create_sms_campaign(
         campaign = create_campaign(db, actor, payload)
         if payload.scheduled_at is not None:
             launch_campaign(db, actor, campaign, payload.scheduled_at)
+            _dispatch_campaign_logs(db, campaign.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
@@ -324,19 +339,9 @@ def launch_sms_campaign(
         launch_campaign(db, actor, campaign, payload.scheduled_at)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    db.commit()
     if payload.scheduled_at is None:
-        queued_log_ids = list(
-            db.scalars(
-                select(SmsLog.id).where(
-                    SmsLog.campaign_id == campaign.id,
-                    SmsLog.status == SmsLogStatus.QUEUED,
-                )
-            )
-        )
-        if queued_log_ids:
-            dispatch_sms_logs_now(db, queued_log_ids)
-            db.commit()
+        _dispatch_campaign_logs(db, campaign.id)
+    db.commit()
     db.refresh(campaign)
     return campaign
 
