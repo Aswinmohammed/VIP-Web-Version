@@ -1,40 +1,64 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppContext } from '../context/AppContext';
 import { InventoryItem } from '../types';
-import { PlusCircle, Edit, Trash2, Package, Download, Loader2, Printer, AlertCircle, Tag, X, Eye } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, Download, Loader2, Printer, AlertCircle, Tag, X } from 'lucide-react';
 import jsPDF from 'jspdf';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 import JsBarcode from 'jsbarcode';
 
 // Removed createInventoryCode since backend handles it
+
+/** Derive the next sequential barcode from the existing inventory list */
+function getNextBarcodeValue(inventory: InventoryItem[]): string {
+  // Find all barcodes that are purely numeric or end in digits
+  const nums = inventory
+    .map((i) => i.barcodeValue || i.itemCode || '')
+    .map((v) => {
+      const match = v.match(/(\d+)$/);
+      return match ? parseInt(match[1], 10) : NaN;
+    })
+    .filter((n) => !isNaN(n));
+
+  if (nums.length === 0) return '1001';
+  const next = Math.max(...nums) + 1;
+  return String(next);
+}
+
 const InventoryForm: React.FC<{
   item?: InventoryItem;
   inventory: InventoryItem[];
   onSave: (item: InventoryItem) => Promise<void>;
   onCancel: () => void;
 }> = ({ item, inventory, onSave, onCancel }) => {
-  const [formData, setFormData] = useState<Omit<InventoryItem, 'id'>>(
-    item || {
+  const [formData, setFormData] = useState<Omit<InventoryItem, 'id'>>(() => {
+    if (item) return { ...item };
+    // Auto-generate next barcode for new items
+    return {
       branchId: '',
       itemCode: '',
-      barcodeValue: '',
+      barcodeValue: getNextBarcodeValue(inventory),
       name: '',
       category: 'Material',
       quantity: 0,
       unitPrice: 0,
       mrp: 0,
       wholesalePrice: 0,
+      isActive: true,
       lastUpdated: new Date().toISOString().split('T')[0],
-    }
-  );
+    };
+  });
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === 'number' ? parseFloat(value) || 0 : type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
+      [name]: type === 'number'
+        ? parseFloat(value) || 0
+        : type === 'checkbox'
+          ? (e.target as HTMLInputElement).checked
+          : value,
     }));
   };
 
@@ -48,9 +72,10 @@ const InventoryForm: React.FC<{
         id: item?.id || `INV${Date.now()}`,
         itemCode: formData.itemCode?.trim().toUpperCase() || '',
         barcodeValue: formData.barcodeValue?.trim() || '',
+        category: formData.category || 'Material',
         mrp: formData.mrp || unitPrice,
         wholesalePrice: formData.wholesalePrice || unitPrice,
-        isActive: formData.isActive !== false,
+        isActive: formData.isActive === true,
         lastUpdated: new Date().toISOString().split('T')[0],
       });
     } finally {
@@ -60,11 +85,12 @@ const InventoryForm: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-2xl border border-slate-100 bg-white p-8 shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-100 bg-white p-8 shadow-2xl">
         <h2 className="border-b pb-4 text-xl font-bold text-gray-800">{item ? 'Edit Item' : 'Add New Item'}</h2>
         <form onSubmit={handleSubmit} className="mt-6 space-y-5">
           <div className="grid gap-5 md:grid-cols-2">
-            <div>
+            {/* Item Name — full width */}
+            <div className="md:col-span-2">
               <label className="mb-1 block text-sm font-medium text-gray-700">Item Name</label>
               <input
                 type="text"
@@ -73,19 +99,10 @@ const InventoryForm: React.FC<{
                 onChange={handleChange}
                 required
                 className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
+                placeholder="e.g. White Cotton Fabric"
               />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Category</label>
-              <input
-                type="text"
-                name="category"
-                value={formData.category}
-                onChange={handleChange}
-                required
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
-              />
-            </div>
+
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
               <input
@@ -99,6 +116,7 @@ const InventoryForm: React.FC<{
                 className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
               />
             </div>
+
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Unit Price (Rs.)</label>
               <input
@@ -112,6 +130,7 @@ const InventoryForm: React.FC<{
                 className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
               />
             </div>
+
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">MRP (Rs.)</label>
               <input
@@ -124,52 +143,47 @@ const InventoryForm: React.FC<{
                 className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
               />
             </div>
+
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Wholesale Price (Rs.)</label>
-              <input
-                type="number"
-                name="wholesalePrice"
-                value={formData.wholesalePrice}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Item Code (Leave empty to auto-generate)</label>
-              <input
-                type="text"
-                name="itemCode"
-                value={formData.itemCode || ''}
-                onChange={handleChange}
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
-                placeholder="e.g. FAB0001"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Barcode (Optional)</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Barcode
+                <span className="ml-2 text-xs font-normal text-indigo-500">(auto-generated, editable)</span>
+              </label>
               <input
                 type="text"
                 name="barcodeValue"
                 value={formData.barcodeValue || ''}
                 onChange={handleChange}
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-primary-500"
-                placeholder="Scanner input here"
+                className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono font-bold tracking-wider focus:border-primary-500 focus:ring-primary-500"
+                placeholder="e.g. 1001"
               />
             </div>
-            <div className="flex items-center mt-6">
-              <input
-                type="checkbox"
-                name="isActive"
-                id="isActive"
-                checked={formData.isActive !== false}
-                onChange={handleChange}
-                className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
-                Active (Available for orders)
-              </label>
+
+            {/* Active toggle — proper controlled checkbox */}
+            <div className="md:col-span-2 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={formData.isActive === true}
+                onClick={() => setFormData((prev) => ({ ...prev, isActive: !(prev.isActive === true) }))}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                  formData.isActive === true ? 'bg-primary-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    formData.isActive === true ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+              <div>
+                <p className="text-sm font-semibold text-gray-800">
+                  {formData.isActive === true ? 'Active' : 'Inactive'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {formData.isActive === true ? 'Item is available for orders' : 'Item is hidden from orders'}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -226,19 +240,19 @@ const Inventory: React.FC = () => {
   const buildLabelHtml = (item: InventoryItem): string => {
     const barcodeValue = item.barcodeValue || item.itemCode || 'UNKNOWN';
     const svgContent = generateBarcodeSvg(barcodeValue);
-    const itemName = item.name.length > 28 ? item.name.slice(0, 26) + '…' : item.name;
+    const itemName = item.name.length > 32 ? item.name.slice(0, 30) + '…' : item.name;
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Label – ${item.itemCode}</title>
+  <title>Label – ${barcodeValue}</title>
   <style>
-    @page { size: 58mm 40mm; margin: 0; }
+    @page { size: A5 landscape; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 58mm;
-      height: 40mm;
+      width: 100%;
+      height: 100%;
       font-family: Arial, Helvetica, sans-serif;
       background: #fff;
       display: flex;
@@ -246,41 +260,43 @@ const Inventory: React.FC = () => {
       justify-content: center;
     }
     .label {
-      width: 58mm;
-      padding: 2mm 3mm;
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       text-align: center;
-      gap: 1.5mm;
-    }
-    .item-code {
-      font-size: 9px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      color: #555;
-      text-transform: uppercase;
+      padding: 28px 36px;
+      gap: 12px;
+      border: 2px solid #999;
+      border-radius: 16px;
+      min-width: 340px;
+      max-width: 500px;
     }
     .item-name {
-      font-size: 11px;
-      font-weight: bold;
+      font-size: 26px;
+      font-weight: 900;
       color: #000;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 52mm;
+      line-height: 1.2;
+      max-width: 460px;
+    }
+    .barcode-num {
+      font-size: 22px;
+      font-weight: 900;
+      color: #111;
+      font-family: monospace;
+      letter-spacing: 2px;
     }
     svg {
-      max-width: 52mm;
+      width: 300px;
       height: auto;
     }
   </style>
 </head>
 <body>
   <div class="label">
-    <div class="item-code">${item.itemCode || ''}</div>
     <div class="item-name">${itemName}</div>
     ${svgContent}
+    <div class="barcode-num">${barcodeValue}</div>
   </div>
 </body>
 </html>`;
@@ -292,7 +308,15 @@ const Inventory: React.FC = () => {
 
   const executePrint = (item: InventoryItem) => {
     const html = buildLabelHtml(item);
-    const printWindow = window.open('', '_blank', 'width=320,height=260,toolbar=0,menubar=0,scrollbars=0');
+    const winWidth = 600;
+    const winHeight = 400;
+    const left = Math.round((window.screen.width - winWidth) / 2);
+    const top = Math.round((window.screen.height - winHeight) / 2);
+    const printWindow = window.open(
+      '',
+      '_blank',
+      `width=${winWidth},height=${winHeight},left=${left},top=${top},toolbar=0,menubar=0,scrollbars=0`
+    );
     if (!printWindow) {
       alert('Pop-up blocked. Please allow pop-ups for this site to print labels.');
       return;
@@ -300,12 +324,9 @@ const Inventory: React.FC = () => {
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
-    // Use setTimeout as a reliable cross-browser print trigger
-    // (window.onload is inconsistent in Chromium for about:blank windows)
     setTimeout(() => {
       printWindow.focus();
       printWindow.print();
-      // Delay close to allow print dialog to fully open
       setTimeout(() => {
         try { printWindow.close(); } catch { /* may already be closed by user */ }
       }, 1000);
@@ -352,7 +373,9 @@ const Inventory: React.FC = () => {
         }
         return (
           item.name.toLowerCase().includes(search) ||
-          item.category.toLowerCase().includes(search)
+          item.category.toLowerCase().includes(search) ||
+          (item.barcodeValue || '').toLowerCase().includes(search) ||
+          (item.itemCode || '').toLowerCase().includes(search)
         );
       }),
     [inventory, searchTerm]
@@ -482,14 +505,6 @@ const Inventory: React.FC = () => {
             <p className="mb-1 text-sm font-medium text-gray-500">Total Stock Value</p>
             <p className="text-3xl font-bold text-gray-800">Rs. {totalStockValue.toLocaleString()}</p>
           </div>
-          <div className="flex gap-4">
-            <button onClick={handlePrint} className="rounded-full border border-slate-200 bg-slate-50 p-3 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700">
-              <Printer size={20} />
-            </button>
-            <div className="rounded-full bg-indigo-100 p-4 text-indigo-600">
-              <Package size={24} />
-            </div>
-          </div>
         </div>
 
         <div className="flex flex-col justify-center rounded-xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
@@ -501,7 +516,7 @@ const Inventory: React.FC = () => {
             {inventory.filter((item) => item.quantity < 5).length > 0 ? (
               inventory.filter((item) => item.quantity < 5).map((item) => (
                 <span key={item.id} className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-700 shadow-sm">
-                  {item.name}: {item.quantity}
+                  {item.name}: {item.quantity} {(item.barcodeValue || item.itemCode) ? `| #${item.barcodeValue || item.itemCode}` : ''}
                 </span>
               ))
             ) : (
@@ -514,7 +529,7 @@ const Inventory: React.FC = () => {
       <AdminFilterBar
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
-        searchPlaceholder="Search by name or category..."
+        searchPlaceholder="Search by name, category or barcode..."
       />
 
       <div className="space-y-4 md:hidden">
@@ -522,10 +537,17 @@ const Inventory: React.FC = () => {
           <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="mt-1 text-lg font-bold text-slate-900">{item.name}</p>
-                <p className="mt-1 text-sm text-slate-500">{item.category}</p>
+                <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <p className="text-lg font-bold text-slate-900">{item.name}</p>
+                  {(item.barcodeValue || item.itemCode) && (
+                    <span className="text-base font-black tracking-wider text-indigo-600 font-mono whitespace-nowrap">
+                      # {item.barcodeValue || item.itemCode}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-1">
+                <button onClick={() => handlePrintLabel(item)} className="rounded-lg bg-indigo-50 p-2 text-indigo-600" title="Print Label"><Tag size={18} /></button>
                 <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg bg-blue-50 p-2 text-blue-600" title="Edit Item"><Edit size={18} /></button>
                 <button onClick={() => void handleDelete(item.id)} className="rounded-lg bg-red-50 p-2 text-red-600" title="Delete Item"><Trash2 size={18} /></button>
               </div>
@@ -561,8 +583,7 @@ const Inventory: React.FC = () => {
           <table className="w-full text-left text-sm text-gray-500">
             <thead className="border-b bg-gray-50 text-xs font-bold uppercase text-gray-700">
               <tr>
-                <th className="px-6 py-4">Item Name</th>
-                <th className="px-6 py-4">Category</th>
+                <th className="px-6 py-4">Item Name & Barcode</th>
                 <th className="px-6 py-4">Quantity</th>
                 <th className="px-6 py-4">Unit Price</th>
                 <th className="px-6 py-4">Status</th>
@@ -572,8 +593,16 @@ const Inventory: React.FC = () => {
             <tbody className="divide-y divide-gray-100">
               {filteredInventory.map((item) => (
                 <tr key={item.id} className="bg-white transition-colors hover:bg-gray-50">
-                  <td className="px-6 py-4 font-semibold text-gray-900">{item.name}</td>
-                  <td className="px-6 py-4">{item.category}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <p className="font-semibold text-gray-900 leading-tight">{item.name}</p>
+                      {(item.barcodeValue || item.itemCode) && (
+                        <span className="font-black text-base tracking-wider text-indigo-600 font-mono whitespace-nowrap">
+                          # {item.barcodeValue || item.itemCode}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 font-medium">{item.quantity}</td>
                   <td className="px-6 py-4 font-bold text-slate-900">Rs. {item.unitPrice.toFixed(2)}</td>
                   <td className="px-6 py-4 text-xs">
@@ -594,7 +623,7 @@ const Inventory: React.FC = () => {
               ))}
               {filteredInventory.length === 0 && (
                 <tr>
-                  <td colSpan={isAllBranchesScope ? 7 : 6} className="px-6 py-12 text-center italic text-gray-500">No inventory items found.</td>
+                  <td colSpan={isAllBranchesScope ? 6 : 5} className="px-6 py-12 text-center italic text-gray-500">No inventory items found.</td>
                 </tr>
               )}
             </tbody>

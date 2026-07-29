@@ -1,7 +1,7 @@
 import React, { useState, useContext, useMemo } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Supplier, SupplierPurchase, SupplierPayment } from '../types';
-import { PlusCircle, Search, User, Phone, DollarSign, Calendar, Printer, Trash2, ArrowLeft, X, Truck, Banknote, Landmark, Eye, Lock, Edit, Loader2 } from 'lucide-react';
+import { PlusCircle, Search, User, Phone, DollarSign, Calendar, Printer, Trash2, ArrowLeft, X, Truck, Banknote, Landmark, Eye, Edit, Loader2 } from 'lucide-react';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 
@@ -10,8 +10,6 @@ const SupplierManagement: React.FC = () => {
     const [view, setView] = useState<'list' | 'detail'>('list');
     const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isAccessGranted, setIsAccessGranted] = useState(true);
-    const [passwordInput, setPasswordInput] = useState('');
 
     // Modals
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -63,16 +61,6 @@ const SupplierManagement: React.FC = () => {
         const lower = searchTerm.toLowerCase();
         return list.filter(s => s.name.toLowerCase().includes(lower) || s.phone.includes(lower));
     }, [suppliers, searchTerm]);
-
-    const handlePasswordSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (passwordInput === 'VIPT' || passwordInput === 'vipt') {
-            setIsAccessGranted(true);
-        } else {
-            alert('Incorrect Password');
-            setPasswordInput('');
-        }
-    };
 
     const selectedSupplier = useMemo(() => suppliers.find(s => s.id === selectedSupplierId), [suppliers, selectedSupplierId]);
 
@@ -432,31 +420,6 @@ const SupplierManagement: React.FC = () => {
             setIsGenerating(false);
         }
     };
-
-    if (view === 'detail' && selectedSupplier) {
-        return (
-            <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)]">
-                <div className="bg-white p-12 rounded-2xl shadow-xl w-full max-w-sm text-center border border-gray-100">
-                    <div className="bg-primary-50 p-6 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6">
-                        <Lock className="w-10 h-10 text-primary-600" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Supplier Access</h2>
-                    <p className="text-gray-500 font-medium text-xs mb-8">Admin verification required</p>
-                    <form onSubmit={handlePasswordSubmit} className="space-y-4">
-                        <input
-                            type="password"
-                            placeholder="••••••"
-                            value={passwordInput}
-                            onChange={e => setPasswordInput(e.target.value)}
-                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none text-center font-bold text-xl tracking-widest focus:ring-2 focus:ring-primary-500 transition-all font-mono"
-                            autoFocus
-                        />
-                        <button type="submit" className="w-full bg-primary-600 text-white font-bold py-3 rounded-lg shadow-md hover:bg-primary-700 transition-all">Verify & Unlock</button>
-                    </form>
-                </div>
-            </div>
-        );
-    }
 
     if (view === 'detail' && selectedSupplier) {
         const filteredPurchases = selectedSupplier.purchases.filter(p => {

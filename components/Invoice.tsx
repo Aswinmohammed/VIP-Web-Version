@@ -18,7 +18,7 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
     const hasAutoPrintedRef = useRef(false);
 
     if (!context) return <div>Loading...</div>;
-    const { orders, customers, branches, isCloudMode, accessToken, getInvoiceUrl } = context;
+    const { orders, customers, branches, inventory, isCloudMode, accessToken, getInvoiceUrl } = context;
 
     const order = orders.find(o => o.id === orderId);
     if (!order) return <div className="p-8 text-center text-red-500 font-bold text-lg">Order not found.</div>;
@@ -264,15 +264,26 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                         <span>Item Description</span>
                         <span>Total</span>
                     </div>
-                    {order.items.map((item) => (
-                        <div key={item.id} className="mb-2">
-                            <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
-                            <div className="flex justify-between text-xs">
-                                <span>{item.quantity} x {calculateItemTotal({ ...item, quantity: 1 }).toFixed(2)}</span>
-                                <span className="bold">{calculateItemTotal(item).toFixed(2)}</span>
+                    {order.items.map((item) => {
+                        const invItem = item.inventoryItemId
+                            ? inventory.find(i => i.id === item.inventoryItemId)
+                            : undefined;
+                        const barcodeDisplay = invItem?.barcodeValue || invItem?.itemCode || null;
+                        return (
+                            <div key={item.id} className="mb-2">
+                                <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
+                                {barcodeDisplay && (
+                                    <div className="bold" style={{ fontSize: '11px', letterSpacing: '0.5px', color: '#444' }}>
+                                        Barcode: {barcodeDisplay}
+                                    </div>
+                                )}
+                                <div className="flex justify-between text-xs">
+                                    <span>{item.quantity} x {calculateItemTotal({ ...item, quantity: 1 }).toFixed(2)}</span>
+                                    <span className="bold">{calculateItemTotal(item).toFixed(2)}</span>
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 <div className="solid-line"></div>

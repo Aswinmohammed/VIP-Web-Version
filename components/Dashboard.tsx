@@ -69,7 +69,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   };
 
   if (!context) return <div>Loading...</div>;
-  const { customers, orders, inventory, materialSales, expenses, employees, settings, currentBranch, isAllBranchesScope, getBranchName, isPageLoading } = context;
+  const { customers, orders, inventory, materialSales, expenses, employees, settings, branches, currentBranch, isAllBranchesScope, getBranchName, isPageLoading } = context;
   const branchScopeLabel = isAllBranchesScope ? 'All Branches' : currentBranch?.name || 'Branch Overview';
   const isInitialDashboardLoading = isPageLoading && customers.length === 0 && orders.length === 0 && inventory.length === 0;
 
@@ -80,17 +80,28 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   };
 
   const todaysPayments = useMemo(() => {
-    const list: { customer: string; orderId: string; amount: number; type: string; method: string }[] = [];
+    const list: { customer: string; orderId: string; branchCode: string; amount: number; type: string; method: string }[] = [];
 
     // Process Orders
     orders.forEach(order => {
-      const cust = customers.find(c => c.id === order.customerId)?.name || 'Unknown';
+      const isWalkIn = !order.customerId || order.customerId === '' || order.customerName === 'Walk-in';
+      const cust = isWalkIn
+        ? 'Walk-in'
+        : (customers.find(c => c.id === order.customerId)?.name || order.customerName || 'Unknown');
+
+      // Resolve branch code: prefer order.branchCode, fallback to branches list
+      const branchCode = order.branchCode
+        || branches.find(b => b.id === order.branchId)?.code
+        || getBranchName(order.branchId)
+        || '—';
+
       if (order.payments && order.payments.length > 0) {
         order.payments.forEach(p => {
           if (p.date === todayStr) {
             list.push({
               customer: cust,
               orderId: order.id,
+              branchCode,
               amount: p.amount,
               type: 'Order Payment',
               method: p.method || 'Cash'
@@ -101,6 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
         list.push({
           customer: cust,
           orderId: order.id,
+          branchCode,
           amount: order.advance,
           type: 'Advance',
           method: 'Cash'
@@ -111,9 +123,13 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
     // Process Material Sales
     materialSales.forEach(sale => {
       if (sale.date === todayStr) {
+        const branchCode = branches.find(b => b.id === sale.branchId)?.code
+          || getBranchName(sale.branchId)
+          || '—';
         list.push({
           customer: sale.customerName || 'Walk-in Customer',
           orderId: sale.id,
+          branchCode,
           amount: sale.paidAmount !== undefined ? sale.paidAmount : sale.totalAmount,
           type: 'Material Sale',
           method: sale.paymentMethod || 'Cash'
@@ -122,7 +138,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
     });
 
     return list;
-  }, [orders, customers, todayStr, materialSales]);
+  }, [orders, customers, branches, getBranchName, todayStr, materialSales]);
 
   const todaysNetCash = todaysPayments.reduce((sum, p) => sum + p.amount, 0);
   const pendingOrdersCount = orders.filter(o => o.status === 'Pending' || o.status === 'Hold' || o.status === 'In Progress').length;
@@ -633,7 +649,7 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
                 <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wider border-b">
                   <tr>
                     <th className="px-6 py-4">Customer Name</th>
-                    <th className="px-6 py-4">Order ID</th>
+                    <th className="px-6 py-4">Branch</th>
                     <th className="px-6 py-4">Payment Method</th>
                     <th className="px-6 py-4 text-right">Amount</th>
                   </tr>
@@ -642,7 +658,11 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
                   {todaysPayments.map((p, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 font-medium text-slate-800">{p.customer}</td>
-                      <td className="px-6 py-4 text-slate-500 text-sm">{formatOrderId(p.orderId)}</td>
+                      <td className="px-6 py-4">
+                        <span className="inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-indigo-700">
+                          {p.branchCode}
+                        </span>
+                      </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded text-xs font-semibold ${p.method === 'Cash' ? 'bg-emerald-100 text-emerald-700' :
                           p.method === 'Card' ? 'bg-blue-100 text-blue-700' :

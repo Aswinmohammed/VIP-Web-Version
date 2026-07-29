@@ -826,7 +826,7 @@ const App: React.FC = () => {
     setInventoryState((current) => {
       const existingIndex = current.findIndex((currentItem) => currentItem.id === item.id || currentItem.id === saved.id);
       if (existingIndex === -1) {
-        return [...current, saved];
+        return [saved, ...current];
       }
       return current.map((currentItem, index) => (index === existingIndex ? saved : currentItem));
     });
