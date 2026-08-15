@@ -40,6 +40,11 @@ svg {
     overflow: visible !important;
   }
 
+  html, body, #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  
   body {
     background-color: white !important;
   }

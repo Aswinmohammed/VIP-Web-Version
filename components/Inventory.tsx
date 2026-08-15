@@ -11,7 +11,7 @@ import JsBarcode from 'jsbarcode';
 
 /** Derive the next sequential barcode from the existing inventory list */
 function getNextBarcodeValue(inventory: InventoryItem[]): string {
-  // Find all barcodes that are purely numeric or end in digits
+  // Find all barcodes that end in digits
   const nums = inventory
     .map((i) => i.barcodeValue || i.itemCode || '')
     .map((v) => {
@@ -20,9 +20,9 @@ function getNextBarcodeValue(inventory: InventoryItem[]): string {
     })
     .filter((n) => !isNaN(n));
 
-  if (nums.length === 0) return '1001';
+  if (nums.length === 0) return 'FAB0001';
   const next = Math.max(...nums) + 1;
-  return String(next);
+  return `FAB${String(next).padStart(4, '0')}`;
 }
 
 const InventoryForm: React.FC<{
@@ -218,10 +218,11 @@ const Inventory: React.FC = () => {
       const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       JsBarcode(svgEl, value, {
         format: 'CODE128',
-        width: 1.8,
-        height: 48,
+        width: 2.2,
+        height: 54,
         displayValue: true,
-        fontSize: 11,
+        fontSize: 14,
+        fontOptions: "bold",
         margin: 4,
         background: '#ffffff',
         lineColor: '#000000',
@@ -658,17 +659,13 @@ const Inventory: React.FC = () => {
                 className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center gap-2 shadow-inner"
                 style={{ width: 220, minHeight: 140 }}
               >
-                {/* Item Code */}
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  {previewItem.itemCode || '—'}
-                </p>
                 {/* Item Name */}
                 <p className="text-sm font-bold text-slate-900 text-center leading-tight max-w-[190px] truncate">
                   {previewItem.name}
                 </p>
                 {/* Live Barcode Preview rendered via useEffect on canvas */}
                 <BarcodePreview value={previewItem.barcodeValue || previewItem.itemCode || 'UNKNOWN'} />
-                <p className="text-[9px] text-slate-400 font-mono">
+                <p className="text-[13px] font-bold text-black font-mono">
                   {previewItem.barcodeValue || previewItem.itemCode}
                 </p>
               </div>
@@ -705,8 +702,8 @@ const BarcodePreview: React.FC<{ value: string }> = ({ value }) => {
     try {
       JsBarcode(canvasRef.current, value, {
         format: 'CODE128',
-        width: 1.4,
-        height: 36,
+        width: 1.8,
+        height: 44,
         displayValue: false,
         margin: 2,
         background: '#ffffff',

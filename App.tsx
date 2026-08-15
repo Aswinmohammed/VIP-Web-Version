@@ -1855,8 +1855,8 @@ const App: React.FC = () => {
       suppliers, setSuppliers,
       settings, setSettings
     }}>
-      <div className="flex flex-col h-screen bg-gray-100">
-        <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col h-screen print:h-auto bg-gray-100 print:bg-white">
+        <div className="flex flex-1 overflow-hidden print:overflow-visible">
           <div className="print:hidden h-full flex">
             <Sidebar navigate={navigateTo} currentPage={page} onLogout={handleLogout} />
           </div>
