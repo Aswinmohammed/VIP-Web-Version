@@ -17,7 +17,7 @@ import SupplierManagement from './components/SupplierManagement';
 import SmsManagement from './components/SmsManagement';
 import UserManagement from './components/UserManagement';
 import { AppContext } from './context/AppContext';
-import { Branch, CurrentUser, Customer, Employee, Expense, InventoryItem, MaterialSale, Order, OrderAction, Page, SalaryPayment, Settings, Supplier, WorkLog } from './types';
+import { AccessArea, Branch, CurrentUser, Customer, Employee, Expense, InventoryItem, MaterialSale, Order, OrderAction, Page, SalaryPayment, Settings, Supplier, WorkLog } from './types';
 import {
   createCloudEmployee,
   createCloudEmployeeSalaryPayment,
@@ -605,7 +605,7 @@ const App: React.FC = () => {
     const selectedBranch = resolvedBranchId !== 'all'
       ? loadedBranches.find((branch) => branch.id === resolvedBranchId) || null
       : null;
-    const branchFilter = actor.role === 'master_admin' && resolvedBranchId === 'all' ? undefined : resolvedBranchId;
+    const branchFilter = resolvedBranchId === 'all' ? undefined : resolvedBranchId;
     const orderDataBranchFilter = (actor.role === 'master_admin' || hasProductionAccess)
       ? (resolvedBranchId === 'all' ? undefined : resolvedBranchId)
       : resolvedBranchId;
@@ -1618,7 +1618,7 @@ const App: React.FC = () => {
     }
 
     if (currentUser?.role === 'master_admin' && activeBranchId === 'all') {
-      return candidatePage !== 'Users';
+      return true;
     }
 
     const accessAreas = currentBranch?.accessAreas || [];
@@ -1626,7 +1626,7 @@ const App: React.FC = () => {
       return true;
     }
 
-    const areaByPage: Partial<Record<Page, string[]>> = {
+    const areaByPage: Partial<Record<Page, AccessArea[]>> = {
       Dashboard: ['dashboard'],
       Customers: ['customers'],
       Orders: ['orders'],
@@ -1642,7 +1642,7 @@ const App: React.FC = () => {
       Reports: ['reports'],
     };
 
-    const allowedAreas = areaByPage[candidatePage] || [];
+    const allowedAreas = areaByPage[candidatePage] ?? [];
     return allowedAreas.some((area) => accessAreas.includes(area));
   }, [activeBranchId, currentBranch?.accessAreas, currentUser?.role]);
 
@@ -1857,8 +1857,10 @@ const App: React.FC = () => {
     }}>
       <div className="flex flex-col h-screen bg-gray-100">
         <div className="flex flex-1 overflow-hidden">
-          <Sidebar navigate={navigateTo} currentPage={page} onLogout={handleLogout} />
-          <main className="relative flex-1 p-6 sm:p-8 overflow-y-auto">
+          <div className="print:hidden h-full flex">
+            <Sidebar navigate={navigateTo} currentPage={page} onLogout={handleLogout} />
+          </div>
+          <main className="relative flex-1 p-6 sm:p-8 overflow-y-auto print:p-0 print:overflow-visible print:h-auto">
             {isPageLoading && (
               <div className="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary-600" />

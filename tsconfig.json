@@ -12,8 +12,7 @@
     "skipLibCheck": true,
     "types": [
       "node",
-      "react",
-      "react-jsx"
+      "react"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

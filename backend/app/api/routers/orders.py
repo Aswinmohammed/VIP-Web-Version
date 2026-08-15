@@ -129,17 +129,23 @@ def _resolve_order_branch_id(db: Session, actor: AuthenticatedActor, requested_b
     return resolve_branch_scope(actor, requested_branch_id)
 
 
+def _order_load_options(include_measurements: bool = True):
+    options = [
+        selectinload(Order.items),
+        selectinload(Order.payments),
+        selectinload(Order.customer),
+        selectinload(Order.branch_rel),
+    ]
+    if include_measurements:
+        options.append(selectinload(Order.measurement_sets).selectinload(MeasurementSet.values))
+    return options
+
+
 def _get_order_or_404(db: Session, actor: AuthenticatedActor, order_id: uuid.UUID) -> Order:
     stmt = _apply_order_scope(
         select(Order)
         .execution_options(populate_existing=True)
-        .options(
-            selectinload(Order.items),
-            selectinload(Order.payments),
-            selectinload(Order.customer),
-            selectinload(Order.branch_rel),
-            selectinload(Order.measurement_sets).selectinload(MeasurementSet.values),
-        )
+        .options(*_order_load_options(include_measurements=True))
         .where(Order.id == order_id),
         db,
         actor,
@@ -150,21 +156,22 @@ def _get_order_or_404(db: Session, actor: AuthenticatedActor, order_id: uuid.UUI
     return order
 
 
-def _serialize_order(order: Order) -> dict:
+def _serialize_order(order: Order, include_measurements: bool = True) -> dict:
     item_measurements: dict[uuid.UUID, list[dict]] = {}
-    for measurement_set in order.measurement_sets:
-        if measurement_set.order_item_id is None:
-            continue
-        item_measurements[measurement_set.order_item_id] = [
-            {
-                "id": value.id,
-                "legacy_id": value.legacy_id,
-                "name": value.name,
-                "value": value.value,
-                "sort_order": value.sort_order,
-            }
-            for value in sorted(measurement_set.values, key=lambda current: current.sort_order)
-        ]
+    if include_measurements:
+        for measurement_set in order.measurement_sets:
+            if measurement_set.order_item_id is None:
+                continue
+            item_measurements[measurement_set.order_item_id] = [
+                {
+                    "id": value.id,
+                    "legacy_id": value.legacy_id,
+                    "name": value.name,
+                    "value": value.value,
+                    "sort_order": value.sort_order,
+                }
+                for value in sorted(measurement_set.values, key=lambda current: current.sort_order)
+            ]
 
     return {
         "id": order.id,
@@ -191,6 +198,7 @@ def _serialize_order(order: Order) -> dict:
         "bag_count": order.bag_count,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
+        "measurements_included": include_measurements,
         "items": [
             {
                 "id": item.id,
@@ -404,15 +412,12 @@ def list_orders(
     to_date: date | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    include_measurements: bool = Query(default=False),
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     stmt = select(Order).options(
-        selectinload(Order.items),
-        selectinload(Order.payments),
-        selectinload(Order.customer),
-        selectinload(Order.branch_rel),
-        selectinload(Order.measurement_sets).selectinload(MeasurementSet.values),
+        *_order_load_options(include_measurements=include_measurements)
     ).order_by(
         Order.order_date.desc(),
         Order.created_at.desc(),
@@ -441,7 +446,7 @@ def list_orders(
         stmt = stmt.offset(offset)
     if limit is not None:
         stmt = stmt.limit(limit)
-    return [_serialize_order(order) for order in db.scalars(stmt)]
+    return [_serialize_order(order, include_measurements=include_measurements) for order in db.scalars(stmt)]
 
 
 @router.get("/production-notifications", response_model=list[ProductionNotificationRead])

@@ -62,12 +62,21 @@ def render_invoice_pdf(order: Order, customer: Customer) -> bytes:
 
     pdf.setFont("Helvetica", 10)
     gross = Decimal("0.00")
-    for item in order.items:
-        line_total = Decimal(item.quantity) * Decimal(item.price_per_unit)
+    for idx, item in enumerate(order.items):
+        cloth_size = Decimal(getattr(item, 'cloth_size', 0) or 0)
+        price_per_unit = Decimal(getattr(item, 'price_per_unit', 0) or 0)
+        quantity = Decimal(getattr(item, 'quantity', 1) or 1)
+        stitch_fee = Decimal(getattr(item, 'stitch_fee', 0) or 0)
+
+        material_cost = cloth_size * price_per_unit * quantity
+        stitch_cost = stitch_fee * quantity
+        line_total = material_cost + stitch_cost
+        unit_price = line_total / quantity if quantity > 0 else Decimal("0.00")
+
         gross += line_total
         pdf.drawString(margin, y, item.dress_type)
         pdf.drawRightString(margin + 225, y, str(item.quantity))
-        pdf.drawRightString(margin + 300, y, f"{Decimal(item.price_per_unit):.2f}")
+        pdf.drawRightString(margin + 300, y, f"{unit_price:.2f}")
         pdf.drawRightString(width - margin, y, f"{line_total:.2f}")
         y -= 16
         if y < 120:

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, apply_branch_scope, ensure_branch_in_tenant, get_current_actor, resolve_branch_scope
-from backend.app.models import InventoryItem
+from backend.app.models import Branch, InventoryItem
 from backend.app.schemas import InventoryItemCreate, InventoryItemRead
 
 
@@ -47,8 +47,32 @@ def _default_barcode_value(item_code: str) -> str:
     return item_code
 
 
+def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
+    if actor.is_master_admin:
+        return True
+    if actor.branch_id is None:
+        return False
+    branch = db.scalar(select(Branch).where(Branch.id == actor.branch_id, Branch.tenant_id == actor.tenant_id))
+    return bool(branch and branch.is_production_hub)
+
+
+def _apply_inventory_scope(stmt, db: Session, actor: AuthenticatedActor, branch_id: uuid.UUID | None = None):
+    if _has_production_access(db, actor):
+        stmt = stmt.where(InventoryItem.tenant_id == actor.tenant_id)
+        if branch_id is not None:
+            stmt = stmt.where(InventoryItem.branch_id == branch_id)
+        return stmt
+    return apply_branch_scope(stmt, InventoryItem, actor, branch_id)
+
+
+def _resolve_inventory_branch_id(db: Session, actor: AuthenticatedActor, requested_branch_id: uuid.UUID | None) -> uuid.UUID | None:
+    if _has_production_access(db, actor):
+        return requested_branch_id or actor.branch_id
+    return resolve_branch_scope(actor, requested_branch_id)
+
+
 def _get_inventory_item_or_404(db: Session, actor: AuthenticatedActor, item_id: uuid.UUID) -> InventoryItem:
-    item = db.scalar(select(InventoryItem).where(InventoryItem.id == item_id, InventoryItem.tenant_id == actor.tenant_id))
+    item = db.scalar(_apply_inventory_scope(select(InventoryItem).where(InventoryItem.id == item_id), db, actor))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found")
     return item
@@ -61,7 +85,12 @@ def list_inventory(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> list[InventoryItem]:
-    stmt = select(InventoryItem).where(InventoryItem.tenant_id == actor.tenant_id).order_by(InventoryItem.item_code.asc().nullslast(), InventoryItem.name.asc())
+    stmt = _apply_inventory_scope(
+        select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast(), InventoryItem.name.asc()),
+        db,
+        actor,
+        branch_id,
+    )
     if is_active is not None:
         stmt = stmt.where(InventoryItem.is_active == is_active)
     return list(db.scalars(stmt))
@@ -77,7 +106,12 @@ def search_inventory(
     db: Session = Depends(get_db),
 ) -> list[InventoryItem]:
     """Search inventory by barcode value, item code, or name (for scanner integration)."""
-    stmt = select(InventoryItem).where(InventoryItem.tenant_id == actor.tenant_id).order_by(InventoryItem.item_code.asc().nullslast())
+    stmt = _apply_inventory_scope(
+        select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast()),
+        db,
+        actor,
+        branch_id,
+    )
     if barcode:
         stmt = stmt.where(InventoryItem.barcode_value.ilike(f"%{barcode.strip()}%"))
     if item_code:
@@ -93,7 +127,7 @@ def create_inventory_item(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> InventoryItem:
-    scoped_branch_id = resolve_branch_scope(actor, payload.branch_id)
+    scoped_branch_id = _resolve_inventory_branch_id(db, actor, payload.branch_id)
     if scoped_branch_id is None:
         from backend.app.models import Branch
         first_branch = db.scalar(select(Branch).where(Branch.tenant_id == actor.tenant_id))
@@ -139,7 +173,7 @@ def update_inventory_item(
     db: Session = Depends(get_db),
 ) -> InventoryItem:
     item = _get_inventory_item_or_404(db, actor, item_id)
-    scoped_branch_id = resolve_branch_scope(actor, payload.branch_id or item.branch_id)
+    scoped_branch_id = _resolve_inventory_branch_id(db, actor, payload.branch_id or item.branch_id)
     if scoped_branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="branch_id is required")
     ensure_branch_in_tenant(db, actor.tenant_id, scoped_branch_id)

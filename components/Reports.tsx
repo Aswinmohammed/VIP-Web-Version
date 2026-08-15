@@ -1,5 +1,6 @@
 import React, { useState, useContext, useMemo, useRef } from 'react';
 import { AppContext } from '../context/AppContext';
+import { Page } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { Lock, Download, Calendar, Filter, X, Receipt, ShoppingBag, History, Search, ArrowUpRight, Loader2, Ban, Scale, Coins, HelpCircle, Info, BarChart2, Phone, Tag, AlertCircle, Edit, Eye } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -28,7 +29,7 @@ const DetailModal: React.FC<{
 );
 
 interface ReportsProps {
-  navigate: (page: string, customerId?: string) => void;
+  navigate: (page: Page, customerId?: string) => void;
 }
 
 const Reports: React.FC<ReportsProps> = ({ navigate }) => {

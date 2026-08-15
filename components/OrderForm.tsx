@@ -2,9 +2,10 @@
 import React, { useState, useContext, useEffect, useMemo, useRef } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, OrderItem, Measurement, Page, DEFAULT_MEASUREMENTS, DressType, Payment, Customer } from '../types';
-import { PlusCircle, Trash2, Save, XCircle, Ruler, Calculator, FileText, Search, ChevronRight, ChevronDown, UserPlus, History, Clock, Scan, Scissors } from 'lucide-react';
+import { PlusCircle, Trash2, Save, XCircle, Ruler, Calculator, FileText, Search, ChevronRight, ChevronDown, UserPlus, History, Clock, Scan, Scissors, Phone } from 'lucide-react';
 import CustomerForm from './CustomerForm';
 import { calculateOrderTotals } from '../utils/orderUtils';
+import { fetchCloudOrder } from '../utils/cloudApi';
 
 interface OrderFormProps {
   orderId?: string | null;
@@ -76,7 +77,7 @@ function parseFlexibleNumber(value: string): number {
 
 const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const context = useContext(AppContext);
-  const { customers, orders, inventory, activeBranchId, currentUser, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope } = context!;
+  const { customers, orders, setOrders, inventory, activeBranchId, currentUser, accessToken, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope } = context!;
   const canManageProductionStatuses = isAllBranchesScope || currentBranch?.isProductionHub || canUseOrderAction('track_completion');
   const blockedStatusValues: Order['status'][] = ['In Progress', 'Completed', 'Packed'];
   const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
@@ -163,6 +164,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
       return;
     }
 
+    if (existingOrder.measurementsLoaded === false && existingOrder.serverId && accessToken) {
+      let cancelled = false;
+      fetchCloudOrder(accessToken, existingOrder.serverId)
+        .then((fullOrder) => {
+          if (cancelled || isDirtyRef.current) {
+            return;
+          }
+          setOrders((currentOrders) => currentOrders.map((currentOrder) => (
+            currentOrder.id === existingOrder.id ? fullOrder : currentOrder
+          )));
+        })
+        .catch((error) => {
+          console.error('Failed to load full order details:', error);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const shouldHydrate = hydratedOrderIdRef.current !== existingOrder.id || !isDirtyRef.current;
     if (!shouldHydrate) {
       return;
@@ -194,7 +214,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
     const cust = customers.find(c => c.id === existingOrder.customerId);
     if (cust) setCustomerSearch(cust.name);
-  }, [orderId, orders, customers, currentUser]);
+  }, [orderId, orders, customers, currentUser, accessToken, setOrders]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -847,14 +867,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                           Customers
                         </div>
                       )}
-                      {filteredResults.customers.map(c => (
-                        <div key={c.id} className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm border-b border-gray-50 last:border-0" onClick={() => selectCustomer(c)}>
-                          <p className="font-bold text-gray-800">{c.name}</p>
-                          <p className="text-xs text-gray-500 flex items-center gap-1.5">
-                            <Clock size={10} /> {c.phone}
-                          </p>
-                        </div>
-                      ))}
+                      {filteredResults.customers.map(c => {
+                        const lastOrder = orders.find(o => o.customerId === c.id);
+                        return (
+                          <div key={c.id} className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm border-b border-gray-50 last:border-0" onClick={() => selectCustomer(c)}>
+                            <p className="font-bold flex items-center gap-1.5">
+                              {lastOrder && <span className="text-blue-600">{lastOrder.id} - </span>}
+                              <span className="text-black">{c.name}</span>
+                            </p>
+                            <p className="text-xs text-green-600 flex items-center gap-1.5 mt-0.5 font-medium">
+                              <Phone size={10} /> {c.phone}
+                            </p>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : filteredResults.matchingOrders.length === 0 && (
                     <div className="px-4 py-6 text-center text-sm text-gray-400 italic">No matches found</div>

@@ -2,14 +2,17 @@
 import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, Page, OrderItem, Measurement } from '../types';
-import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquare, Download, Loader2, StickyNote, Filter, Phone, Package, PhoneCall, Copy, Check, BellRing } from 'lucide-react';
+import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquare, Download, Loader2, StickyNote, Filter, Phone, Package, PhoneCall, Copy, Check, BellRing, MessageSquare, Send } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import DressQuantityTracker from './DressQuantityTracker';
-import { fetchProductionNotifications, fetchCloudOrderSearch } from '../utils/cloudApi';
+import { fetchCloudOrder, fetchProductionNotifications, fetchCloudOrderSearch, sendCloudOrderSms } from '../utils/cloudApi';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 import { calculateOrderTotals } from '../utils/orderUtils';
+
+const OWNER_CONTACT_PHONE = '077 777 0811';
+const OWNER_CONTACT_INDENT = '                             ';
 
 interface OrdersProps {
   navigate: (page: Page, orderId?: string) => void;
@@ -46,6 +49,152 @@ const CopyButton: React.FC<{ text: string }> = ({ text }: { text: string }) => {
   );
 };
 
+
+interface PackingSmsModalProps {
+  order: Order;
+  customer: any;
+  branchName: string;
+  branchPhone: string;
+  initialMessage: string;
+  computeFinal: (o: Order) => any;
+  onClose: () => void;
+  onSubmit: (phone: string, message: string) => Promise<void>;
+  formatOrderId: (id: string) => string;
+  formatPhoneNumber: (phone: string) => string;
+}
+
+const PackingSmsModal: React.FC<PackingSmsModalProps> = ({
+  order,
+  customer,
+  branchName,
+  branchPhone,
+  initialMessage,
+  computeFinal,
+  onClose,
+  onSubmit,
+  formatOrderId,
+  formatPhoneNumber,
+}) => {
+  const { balance } = computeFinal(order);
+  const [phone, setPhone] = useState(customer?.phone || order.customerPhone || '');
+  const [message, setMessage] = useState(initialMessage);
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim()) {
+      setError('Customer phone number is required.');
+      return;
+    }
+    if (!message.trim()) {
+      setError('SMS message cannot be empty.');
+      return;
+    }
+
+    setIsSending(true);
+    setError('');
+    try {
+      await onSubmit(phone, message);
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Failed to send SMS.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 print:hidden">
+      <form onSubmit={handleFormSubmit} className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-300">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div className="flex items-center">
+            <div className="bg-blue-600 p-3 rounded-xl mr-3 shadow-lg shadow-blue-600/20">
+              <MessageSquare className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Send Packing SMS</h2>
+              <p className="text-sm text-slate-500">Edit the message before sending it to the customer.</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 hover:bg-white/60 rounded-full transition-colors">
+            <X size={20} className="text-slate-400" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Customer</p>
+              <p className="text-lg font-black text-slate-900">{customer?.name || order.customerName || 'Unknown'}</p>
+              <div className="flex items-center text-indigo-600 font-semibold">
+                <Phone size={16} className="mr-2" /> {formatPhoneNumber(phone || '')}
+              </div>
+              <p className="text-xs text-slate-500">Order: {formatOrderId(order.id)}</p>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-2">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">Branch Details</p>
+              <p className="text-lg font-black text-slate-900">{branchName}</p>
+              <div className="flex items-center text-blue-700 font-semibold">
+                <Phone size={16} className="mr-2" /> {branchPhone}
+              </div>
+              <p className="text-xs text-blue-700">Due Balance: Rs. {balance.toFixed(2)}</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Phone Number</label>
+            <input
+              type="text"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="0771234567"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">SMS Message</label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={7}
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm leading-6 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              placeholder="Type your packing SMS..."
+              required
+            />
+            <p className="mt-2 text-xs text-slate-500">The customer will receive exactly the message shown here.</p>
+          </div>
+
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 font-bold transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isSending}
+            className="flex-1 px-4 py-2.5 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-bold transition-colors shadow-md inline-flex items-center justify-center"
+          >
+            {isSending ? <Loader2 size={18} className="mr-2 animate-spin" /> : <Send size={18} className="mr-2" />}
+            Send SMS
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
 
 const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: () => void; onToggleCut: (itemId: string) => void; onUpdateStatus: (status: Order['status']) => void }> = ({
   order,
@@ -132,7 +281,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
           </div>
         </div>
 
-        <div id="cutting-sheet-container" className="p-8 overflow-y-auto flex-1 bg-[#f9fafb] space-y-8">
+        <div id="cutting-sheet-container" className="p-8 overflow-y-auto flex-1 bg-[#f9fafb] grid grid-cols-1 lg:grid-cols-2 gap-8 content-start">
           {order.items.map((item: OrderItem, index: number) => (
             <div key={item.id} className={`bg-white border-2 rounded-[1.5rem] shadow-sm overflow-hidden transition-all duration-300 ${item.isCut ? 'border-emerald-500 ring-4 ring-emerald-500/5' : 'border-slate-100'}`}>
               <div className="bg-[#fcfdfe] border-b border-slate-100 px-8 py-5 flex items-center justify-between">
@@ -241,7 +390,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                 <span><span className="bold">Name:</span> {customerName}</span>
               </div>
               <div className="flex justify-between mt-1">
-                <span><span className="bold">Type:</span> {item.dressType}</span>
+                <span><span className="bold">Type:</span> {idx + 1} {item.dressType}</span>
                 <span><span className="bold">Qty:</span> <span className="bold">{item.quantity}</span></span>
               </div>
               <div className="mt-1">
@@ -309,6 +458,62 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
   const [modalSearch, setModalSearch] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
+  const [packingSmsModalOpen, setPackingSmsModalOpen] = useState(false);
+  const [selectedSmsOrder, setSelectedSmsOrder] = useState<Order | null>(null);
+
+  const getBranchName = (order: Order) => {
+    if (!context) return 'VIP Tailors';
+    const branch = context.branches.find(b => b.id === (order.branchId || context.activeBranchId));
+    return branch ? branch.name : 'VIP Tailors';
+  };
+
+  const getBranchPhone = (order: Order) => {
+    if (!context) return '077 777 0811';
+    const branch = context.branches.find(b => b.id === (order.branchId || context.activeBranchId));
+    return branch ? branch.phone : '077 777 0811';
+  };
+
+  const buildPackingSmsMessage = (order: Order) => {
+    if (!context) return '';
+    const customer = context.customers.find(c => c.id === order.customerId);
+    const { balance } = calculateOrderTotals(order);
+    const branchPhone = getBranchPhone(order);
+    const paymentLine = balance > 0 ? `Balance amount: Rs.${balance.toFixed(2)}.` : 'Payment is fully settled.';
+    
+    return [
+      `Dear ${customer?.name || order.customerName || 'Customer'}, your order ${formatOrderId(order.id)} is packed and ready for collection.`,
+      paymentLine,
+      `For More Details: ${branchPhone}`,
+      `${OWNER_CONTACT_INDENT}${OWNER_CONTACT_PHONE}`,
+      'Thank you - VIP Tailors & Fashion Pvt Ltd.',
+    ].join('\n');
+  };
+
+  const handleOpenPackingSms = (order: Order) => {
+    setSelectedSmsOrder(order);
+    setPackingSmsModalOpen(true);
+  };
+
+  const handleSendPackingSms = async (phone: string, message: string) => {
+    if (!context?.isCloudMode || !context?.accessToken) {
+      throw new Error('SMS sending is available only in cloud mode.');
+    }
+    if (!selectedSmsOrder?.serverId) {
+      throw new Error('This order must be saved to the cloud before sending an SMS.');
+    }
+
+    const result = await sendCloudOrderSms(context.accessToken, {
+      orderId: selectedSmsOrder.serverId,
+      phone,
+      message,
+    });
+
+    if (result.status === 'failed' || result.status === 'skipped' || result.status === 'cancelled') {
+      throw new Error(result.message || 'The SMS could not be sent.');
+    }
+
+    alert(`SMS sent successfully to ${phone}.`);
+  };
 
   if (!context) return null;
   const { orders, setOrders, customers, currentUser, activeBranchId } = context;
@@ -484,7 +689,8 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
 
         pdf.setTextColor(31, 41, 55);
         pdf.setFont('helvetica', 'italic');
-        pdf.text(o.status, pageWidth - margin - 3, yPos + 6, { align: 'right' });
+        // Removing Status text from PDF table
+        // pdf.text(o.status, pageWidth - margin - 3, yPos + 6, { align: 'right' });
 
         pdf.setDrawColor(209, 213, 219); // gray-300
         pdf.setLineDashPattern([1, 1], 0);
@@ -570,7 +776,6 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                 <th className="px-4 py-3 border-b">Order ID</th>
                 <th className="px-4 py-3 border-b text-right">Total Amnt</th>
                 <th className="px-4 py-3 border-b text-right">Balance</th>
-                <th className="px-4 py-3 border-b text-center">Status</th>
                 <th className="px-4 py-3 border-b text-center">Action</th>
               </tr>
             </thead>
@@ -629,21 +834,19 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-4 font-mono text-xs text-gray-500">{o.id}</td>
+                    <td className="px-4 py-4">
+                      <div className="font-mono text-xs text-gray-500">{o.id}</div>
+                      {o.status === 'Packed' && o.bagCount && (
+                        <div className="text-[9px] font-black text-indigo-600 mt-1.5 uppercase tracking-tighter flex items-center gap-1 bg-indigo-50 px-1.5 py-0.5 rounded w-fit">
+                          <Package size={8} /> {o.bagCount} BAGS
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-4 text-right font-semibold text-gray-600">Rs. {c.final.toFixed(2)}</td>
                     <td className="px-4 py-4 text-right text-orange-600 font-black italic">Rs. {c.balance.toFixed(2)}</td>
                     <td className="px-4 py-4 text-center">
-                      <div className="flex flex-col items-center">
-                        <span className={getStatusChip(o.status)}>{o.status}</span>
-                        {o.status === 'Packed' && o.bagCount && (
-                          <span className="text-[9px] font-black text-indigo-600 mt-1 uppercase tracking-tighter flex items-center gap-1 bg-indigo-50 px-1.5 rounded">
-                            <Package size={8} /> {o.bagCount} BAGS
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-center">
                       <div className="flex gap-2 justify-center">
+                        <button onClick={() => handleOpenPackingSms(o)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md border border-blue-200" title="Send Packing SMS"><MessageSquare size={16} /></button>
                         <button onClick={() => navigate('Invoice', o.id)} className="p-1.5 text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200" title="View Invoice"><Eye size={16} /></button>
                         <button onClick={() => handleMarkDelivered(o.id)} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 hover:bg-emerald-100 transition-all">Paid & Deliver</button>
                         <button onClick={() => handleLocalMarkAsDue(o.id)} className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold border border-blue-100 hover:bg-blue-100 transition-all">Mark Due</button>
@@ -734,6 +937,23 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
           </div>
         </div>
       </div>
+      {packingSmsModalOpen && selectedSmsOrder && (
+        <PackingSmsModal
+          order={selectedSmsOrder}
+          customer={context.customers.find(c => c.id === selectedSmsOrder.customerId)}
+          branchName={getBranchName(selectedSmsOrder)}
+          branchPhone={getBranchPhone(selectedSmsOrder)}
+          initialMessage={buildPackingSmsMessage(selectedSmsOrder)}
+          computeFinal={computeFinal}
+          onClose={() => {
+            setPackingSmsModalOpen(false);
+            setSelectedSmsOrder(null);
+          }}
+          onSubmit={handleSendPackingSms}
+          formatOrderId={formatOrderId}
+          formatPhoneNumber={(phone) => formatPhoneNumber(phone || '')}
+        />
+      )}
     </div>
   );
 };
@@ -754,6 +974,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const [completedModalOpen, setCompletedModalOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   const [branchNotifications, setBranchNotifications] = useState<Array<{ branchId: string; branchName: string; latestOrderNumber: string; count: number }>>([]);
+  const [isGeneratingEmergencyPdf, setIsGeneratingEmergencyPdf] = useState(false);
 
   if (!context) return <div>Loading...</div>;
   const { orders, setOrders, customers, currentUser, activeBranchId, accessToken, currentBranch, canAccessPage, canUseOrderAction, branches, isAllBranchesScope, getBranchName, employees, setEmployees } = context;
@@ -763,6 +984,24 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
   const getCustomerPhone = useCallback((order: Order) => order.customerPhone || customersById.get(order.customerId)?.phone || '', [customersById]);
   const branchNameById = useMemo(() => new Map(branches.map((branch) => [branch.id, branch.name])), [branches]);
   const getOrderBranchName = (order: Order) => order.branchName || branchNameById.get(order.branchId || '') || getBranchName(order.branchId) || 'Unknown Branch';
+
+  const openCutSheet = useCallback(async (order: Order) => {
+    if (order.measurementsLoaded !== false || !order.serverId || !accessToken) {
+      setViewingMeasurementsOrder(order);
+      return;
+    }
+
+    try {
+      const fullOrder = await fetchCloudOrder(accessToken, order.serverId);
+      setOrders((currentOrders) => currentOrders.map((currentOrder) => (
+        currentOrder.id === order.id ? fullOrder : currentOrder
+      )));
+      setViewingMeasurementsOrder(fullOrder);
+    } catch (error) {
+      console.error('Failed to load full order details:', error);
+      setViewingMeasurementsOrder(order);
+    }
+  }, [accessToken, setOrders]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -811,9 +1050,9 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     })
       .then((results) => {
         if (cancelled) return;
-        // Apply Emergency pseudo-filter client-side
+        // Apply Emergency pseudo-filter client-side (exclude Delivered and Packed — emergency mark is cleared for those)
         const filtered = statusFilter === 'Emergency'
-          ? results.filter((o) => o.emergency)
+          ? results.filter((o) => o.emergency && o.status !== 'Delivered' && o.status !== 'Packed')
           : results;
         setSearchResults(filtered);
         setIsSearching(false);
@@ -1098,6 +1337,140 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
     { label: 'Emergency Orders', value: 'Emergency' },
   ];
 
+  // ── Emergency Orders PDF ─────────────────────────────────────────────────
+  const handleDownloadEmergencyPdf = async () => {
+    if (isGeneratingEmergencyPdf) return;
+    setIsGeneratingEmergencyPdf(true);
+
+    const emergencyOrders = filteredOrders; // already filtered to Emergency by statusFilter
+
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const margin = 12;
+      let yPos = 20;
+
+      const checkNewPage = (requiredSpace: number) => {
+        if (yPos + requiredSpace > 280) {
+          pdf.addPage();
+          yPos = 20;
+        }
+      };
+
+      // ── Header ──
+      pdf.setFontSize(22);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(185, 28, 28); // red-700
+      pdf.text('EMERGENCY ORDERS REPORT', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 9;
+
+      pdf.setFontSize(10);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(107, 114, 128); // gray-500
+      pdf.text(`Total: ${emergencyOrders.length} order${emergencyOrders.length !== 1 ? 's' : ''}`, margin, yPos);
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin, yPos, { align: 'right' });
+      yPos += 10;
+
+      // ── Table header row ──
+      pdf.setFillColor(185, 28, 28); // red-700
+      pdf.rect(margin, yPos, pageWidth - margin * 2, 11, 'F');
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(255, 255, 255);
+      pdf.text('Customer Name', margin + 3, yPos + 7);
+      pdf.text('Phone', margin + 52, yPos + 7);
+      pdf.text('Order ID', margin + 90, yPos + 7);
+      pdf.text('Due Date', margin + 122, yPos + 7);
+      pdf.text('Total', margin + 152, yPos + 7);
+      pdf.text('Status', pageWidth - margin - 3, yPos + 7, { align: 'right' });
+      yPos += 11;
+
+      // ── Table rows ──
+      let sumTotal = 0;
+
+      emergencyOrders.forEach((o, idx) => {
+        checkNewPage(10);
+
+        const custName = getCustomerName(o);
+        const custPhone = getCustomerPhone(o);
+        const totals = calculateOrderTotals(o);
+        sumTotal += totals.finalAmount;
+
+        // Zebra striping — light red tint
+        if (idx % 2 === 1) {
+          pdf.setFillColor(255, 241, 242); // red-50
+          pdf.rect(margin, yPos, pageWidth - margin * 2, 9.5, 'F');
+        }
+
+        pdf.setFontSize(9);
+        pdf.setTextColor(31, 41, 55);
+
+        pdf.setFont('helvetica', 'bold');
+        const name = custName.length > 22 ? custName.substring(0, 19) + '...' : custName;
+        pdf.text(name, margin + 3, yPos + 6);
+
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(formatPhoneNumber(custPhone), margin + 52, yPos + 6);
+
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(formatOrderId(o.id), margin + 90, yPos + 6);
+
+        pdf.setFontSize(9);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(31, 41, 55);
+        pdf.text(o.dueDate || '-', margin + 122, yPos + 6);
+        pdf.text(`Rs. ${totals.finalAmount.toFixed(2)}`, margin + 152, yPos + 6);
+
+        pdf.setFont('helvetica', 'italic');
+        pdf.setTextColor(107, 114, 128);
+        pdf.text(o.status, pageWidth - margin - 3, yPos + 6, { align: 'right' });
+
+        pdf.setDrawColor(254, 202, 202); // red-200
+        pdf.setLineDashPattern([1, 1], 0);
+        pdf.line(margin, yPos + 9.5, pageWidth - margin, yPos + 9.5);
+        pdf.setLineDashPattern([], 0);
+        yPos += 9.5;
+      });
+
+      // ── Summary ──
+      checkNewPage(25);
+      yPos += 5;
+      pdf.setDrawColor(185, 28, 28);
+      pdf.setLineWidth(0.5);
+      pdf.line(margin + 130, yPos, pageWidth - margin, yPos);
+      yPos += 7;
+
+      pdf.setFontSize(10);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(31, 41, 55);
+      pdf.text('Grand Total:', margin + 130, yPos);
+      pdf.text(`Rs. ${sumTotal.toFixed(2)}`, pageWidth - margin - 3, yPos, { align: 'right' });
+
+      // ── Footer on every page ──
+      const totalPages = (pdf.internal as any).pages.length - 1;
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(156, 163, 175);
+        pdf.text(
+          `Page ${i} of ${totalPages}  |  VIP Tailors – Emergency Orders`,
+          pageWidth / 2,
+          285,
+          { align: 'center' }
+        );
+      }
+
+      const filename = `Emergency_Orders_${new Date().toISOString().split('T')[0]}.pdf`;
+      downloadDataUri(filename, pdf.output('datauristring'));
+      alert('Emergency Orders PDF downloaded successfully.');
+    } catch (error) {
+      console.error('Emergency PDF generation failed:', error);
+      alert('Error generating PDF.');
+    } finally {
+      setIsGeneratingEmergencyPdf(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1127,16 +1500,28 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           }
         }}
         statusOptions={statusOptions}
-        extraActions={canFilterProductionStatuses && (statusFilter === 'Completed' || statusFilter === 'Packed') ? (
-          <button
-            onClick={() => setCompletedModalOpen(true)}
-            className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-600 transition-colors hover:bg-blue-100"
-            title="Generate Call List"
-          >
-            <Package className="mr-2 h-4 w-4" />
-            Call List
-          </button>
-        ) : null}
+        extraActions={
+          statusFilter === 'Emergency' ? (
+            <button
+              onClick={handleDownloadEmergencyPdf}
+              disabled={isGeneratingEmergencyPdf || filteredOrders.length === 0}
+              className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Download Emergency Orders PDF"
+            >
+              {isGeneratingEmergencyPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Download PDF
+            </button>
+          ) : canFilterProductionStatuses && (statusFilter === 'Completed' || statusFilter === 'Packed') ? (
+            <button
+              onClick={() => setCompletedModalOpen(true)}
+              className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-600 transition-colors hover:bg-blue-100"
+              title="Generate Call List"
+            >
+              <Package className="mr-2 h-4 w-4" />
+              Call List
+            </button>
+          ) : null
+        }
       />
 
       {branchNotifications.length > 0 && (
@@ -1205,7 +1590,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
               </div>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-              {canOpenCutSheet && <button onClick={() => setViewingMeasurementsOrder(order)} className="rounded-lg bg-indigo-50 p-2 text-indigo-600" title="Cut Sheet"><Scissors size={18} /></button>}
+              {canOpenCutSheet && <button onClick={() => void openCutSheet(order)} className="rounded-lg bg-indigo-50 p-2 text-indigo-600" title="Cut Sheet"><Scissors size={18} /></button>}
               {canTrackCompletion && <button onClick={() => setTrackingOrder(order)} className="rounded-lg bg-orange-50 p-2 text-orange-600" title="Track Dress Completion"><Package size={18} /></button>}
               {canOpenInvoice && <button onClick={() => navigate('Invoice', order.id)} className="rounded-lg bg-slate-100 p-2 text-slate-600" title="Invoice"><Eye size={18} /></button>}
               {canEditOrder && <button onClick={() => navigate('Edit Order', order.id)} className="rounded-lg bg-blue-50 p-2 text-blue-600" title="Edit"><Edit size={18} /></button>}
@@ -1263,7 +1648,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
                     <div className="text-emerald-600 font-bold text-[13px]">{formatPhoneNumber(getCustomerPhone(order))}</div>
                   </td>
                   <td className="px-6 py-4 text-gray-500">{order.orderDate}</td>
-                  <td className="px-6 py-4 text-gray-500">{order.dueDate || '-'}{order.emergency && <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">Emergency</span>}</td>
+                  <td className="px-6 py-4 text-gray-500">{order.dueDate || '-'}{order.emergency && order.status !== 'Delivered' && order.status !== 'Packed' && <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">Emergency</span>}</td>
                   <td className="px-6 py-4 font-bold text-gray-900">Rs. {calculateOrderTotals(order).finalAmount.toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -1315,7 +1700,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
                     </div>
                   </td>
                   <td className="px-6 py-4 flex justify-center space-x-1">
-                    {canOpenCutSheet && <button onClick={() => setViewingMeasurementsOrder(order)} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md" title="Cut Sheet"><Scissors size={18} /></button>}
+                    {canOpenCutSheet && <button onClick={() => void openCutSheet(order)} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md" title="Cut Sheet"><Scissors size={18} /></button>}
                     {canTrackCompletion && <button onClick={() => setTrackingOrder(order)} className="p-1.5 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-md" title="Track Dress Completion"><Package size={18} /></button>}
                     {canOpenInvoice && <button onClick={() => navigate('Invoice', order.id)} className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-md" title="Invoice"><Eye size={18} /></button>}
                     {canEditOrder && <button onClick={() => navigate('Edit Order', order.id)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md" title="Edit"><Edit size={18} /></button>}

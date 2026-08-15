@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager, suppress
 
 from pydantic import BaseModel
@@ -893,13 +894,16 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.request_id = request_id
     start_time = time.perf_counter()
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         logger.exception(
-            "Unhandled API error method=%s path=%s elapsed_ms=%.2f",
+            "Unhandled API error request_id=%s method=%s path=%s elapsed_ms=%.2f",
+            request_id,
             request.method,
             request.url.path,
             elapsed_ms,
@@ -907,9 +911,11 @@ async def log_requests(request: Request, call_next):
         raise
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
+    response.headers["X-Request-ID"] = request_id
     if response.status_code >= 500:
         logger.error(
-            "Server error response method=%s path=%s status=%s elapsed_ms=%.2f",
+            "Server error response request_id=%s method=%s path=%s status=%s elapsed_ms=%.2f",
+            request_id,
             request.method,
             request.url.path,
             response.status_code,
@@ -936,16 +942,24 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError):
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(_: Request, exc: Exception):
-    logger.exception("Unhandled application exception")
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+    logger.exception(
+        "Unhandled application exception request_id=%s method=%s path=%s",
+        request_id,
+        request.method,
+        request.url.path,
+    )
     if settings.environment == "production":
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Internal server error"},
+            content={"detail": "Internal server error", "request_id": request_id},
+            headers={"X-Request-ID": request_id},
         )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": str(exc)},
+        content={"detail": str(exc), "request_id": request_id},
+        headers={"X-Request-ID": request_id},
     )
 
 

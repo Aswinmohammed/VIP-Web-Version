@@ -155,11 +155,9 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                     body * { visibility: hidden; }
                     .receipt-container, .receipt-container * { visibility: visible; }
                     .receipt-container {
-                        position: absolute !important;
-                        left: 0 !important; top: 0 !important;
-                        width: 72mm !important; /* Adjusted for printer margins */
+                        width: 74mm !important; /* Adjusted for 80mm printer margins */
+                        margin: 0 auto !important;
                         padding: 2mm !important;
-                        margin: 0 !important;
                         border: none !important;
                         box-shadow: none !important;
                         box-sizing: border-box !important;
@@ -273,7 +271,7 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                             <div key={item.id} className="mb-2">
                                 <div className="bold uppercase" style={{ fontSize: '12px' }}>{item.dressType} {item.clothName ? `(${item.clothName})` : ''}</div>
                                 {barcodeDisplay && (
-                                    <div className="bold" style={{ fontSize: '11px', letterSpacing: '0.5px', color: '#444' }}>
+                                    <div className="bold" style={{ fontSize: '11px', letterSpacing: '0.5px' }}>
                                         Barcode: {barcodeDisplay}
                                     </div>
                                 )}

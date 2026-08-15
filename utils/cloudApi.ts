@@ -148,6 +148,7 @@ type ApiOrder = {
   called_timestamp?: string | null;
   call_history?: string[] | null;
   bag_count?: number | null;
+  measurements_included?: boolean;
   items: ApiOrderItem[];
   payments: ApiPayment[];
 };
@@ -434,13 +435,21 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const text = await response.text();
-    let payload: { detail?: unknown; errors?: unknown } | null = null;
+    let payload: { detail?: unknown; errors?: unknown; request_id?: unknown } | null = null;
     try {
-      payload = text ? JSON.parse(text) as { detail?: unknown; errors?: unknown } : null;
+      payload = text ? JSON.parse(text) as { detail?: unknown; errors?: unknown; request_id?: unknown } : null;
     } catch {
       payload = null;
     }
     if (typeof payload?.detail === 'string') {
+      if (response.status >= 500 && payload.detail.toLowerCase() === 'internal server error') {
+        const requestId = typeof payload.request_id === 'string' ? payload.request_id : response.headers.get('X-Request-ID');
+        throw new Error(
+          requestId
+            ? `The server hit an unexpected error. Please try again, then report this reference ID: ${requestId}`
+            : 'The server hit an unexpected error. Please try again or contact support.',
+        );
+      }
       throw new Error(payload.detail);
     }
     if (Array.isArray(payload?.errors)) {
@@ -617,6 +626,7 @@ function toOrder(order: ApiOrder): Order {
     calledTimestamp: order.called_timestamp ?? undefined,
     callHistory: order.call_history ?? [],
     bagCount: order.bag_count ?? undefined,
+    measurementsLoaded: order.measurements_included ?? true,
   };
 }
 
@@ -1271,6 +1281,11 @@ export async function fetchCloudOrders(
   return response.map(toOrder);
 }
 
+export async function fetchCloudOrder(token: string, orderServerId: string): Promise<Order> {
+  const response = await apiRequest<ApiOrder>(`/orders/${orderServerId}`, { headers: jsonHeaders(token) });
+  return toOrder(response);
+}
+
 /**
  * Server-side order search used by the Orders page.
  * Applies search, status, and date filters at the database level.
@@ -1451,10 +1466,30 @@ export async function updateCloudOrder(token: string, order: Order): Promise<Ord
   if (!order.serverId) {
     throw new Error('Missing server order id for update');
   }
+  let payloadOrder = order;
+  if (order.measurementsLoaded === false) {
+    const fullOrder = await fetchCloudOrder(token, order.serverId);
+    const measurementsByItemId = new Map(
+      fullOrder.items.flatMap((item) => [
+        [item.id, item.measurements],
+        ...(item.serverId ? [[item.serverId, item.measurements] as const] : []),
+      ]),
+    );
+    payloadOrder = {
+      ...order,
+      measurementsLoaded: true,
+      items: order.items.map((item) => ({
+        ...item,
+        measurements: item.measurements.length > 0
+          ? item.measurements
+          : measurementsByItemId.get(item.id) || (item.serverId ? measurementsByItemId.get(item.serverId) : undefined) || [],
+      })),
+    };
+  }
   const response = await apiRequest<ApiOrder>(`/orders/${order.serverId}`, {
     method: 'PUT',
     headers: jsonHeaders(token),
-    body: JSON.stringify(fromOrder(order)),
+    body: JSON.stringify(fromOrder(payloadOrder)),
   });
   return toOrder(response);
 }

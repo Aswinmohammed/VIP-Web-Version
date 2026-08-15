@@ -214,6 +214,7 @@ export interface Order {
   calledTimestamp?: string;
   callHistory?: string[];
   bagCount?: number;
+  measurementsLoaded?: boolean;
 }
 
 export interface InventoryItem {

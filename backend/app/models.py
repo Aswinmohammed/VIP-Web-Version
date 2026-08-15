@@ -197,7 +197,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixi
 
     customer: Mapped["Customer"] = relationship(back_populates="orders")
     branch_rel: Mapped["Branch"] = relationship(back_populates="orders")
-    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan", order_by="OrderItem.created_at")
     payments: Mapped[list["Payment"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     measurement_sets: Mapped[list["MeasurementSet"]] = relationship(back_populates="order")
 

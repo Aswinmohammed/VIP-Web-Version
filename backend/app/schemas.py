@@ -329,6 +329,7 @@ class OrderRead(ORMModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
     branch_id: uuid.UUID
+    measurements_included: bool = True
     branch_name: str | None = None
     branch_code: str | None = None
     branch_address: str | None = None

@@ -703,12 +703,9 @@ const EmployeeManagement: React.FC = () => {
             body * { visibility: hidden; }
             #print-statement, #print-statement * { visibility: visible; }
             #print-statement {
-              position: absolute !important;
-              left: 0 !important;
-              top: 0 !important;
-              width: 76mm !important; /* Adjusted for printer margins */
+              width: 74mm !important; /* Adjusted for 80mm printer margins */
+              margin: 0 auto !important;
               padding: 2mm !important;
-              margin: 0 !important;
               background: white !important;
               font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
               border: none !important;

@@ -248,7 +248,7 @@ const Inventory: React.FC = () => {
   <meta charset="UTF-8" />
   <title>Label – ${barcodeValue}</title>
   <style>
-    @page { size: A5 landscape; margin: 0; }
+    @page { size: auto; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%;
@@ -273,18 +273,18 @@ const Inventory: React.FC = () => {
       max-width: 500px;
     }
     .item-name {
-      font-size: 26px;
+      font-size: 40px;
       font-weight: 900;
       color: #000;
       line-height: 1.2;
       max-width: 460px;
     }
     .barcode-num {
-      font-size: 22px;
+      font-size: 38px;
       font-weight: 900;
       color: #111;
       font-family: monospace;
-      letter-spacing: 2px;
+      letter-spacing: 4px;
     }
     svg {
       width: 300px;
@@ -366,18 +366,20 @@ const Inventory: React.FC = () => {
 
   const filteredInventory = useMemo(
     () =>
-      inventory.filter((item) => {
-        const search = searchTerm.toLowerCase().trim();
-        if (!search) {
-          return true;
-        }
-        return (
-          item.name.toLowerCase().includes(search) ||
-          item.category.toLowerCase().includes(search) ||
-          (item.barcodeValue || '').toLowerCase().includes(search) ||
-          (item.itemCode || '').toLowerCase().includes(search)
-        );
-      }),
+      [...inventory]
+        .reverse()
+        .filter((item) => {
+          const search = searchTerm.toLowerCase().trim();
+          if (!search) {
+            return true;
+          }
+          return (
+            item.name.toLowerCase().includes(search) ||
+            item.category.toLowerCase().includes(search) ||
+            (item.barcodeValue || '').toLowerCase().includes(search) ||
+            (item.itemCode || '').toLowerCase().includes(search)
+          );
+        }),
     [inventory, searchTerm]
   );
 
