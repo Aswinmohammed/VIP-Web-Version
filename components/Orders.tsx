@@ -281,8 +281,9 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
           </div>
         </div>
 
-        <div id="cutting-sheet-container" className="p-8 overflow-y-auto flex-1 bg-[#f9fafb] grid grid-cols-1 lg:grid-cols-2 gap-8 content-start">
-          {order.items.map((item: OrderItem, index: number) => (
+        <div className="overflow-y-auto flex-1 bg-[#f9fafb]">
+          <div id="cutting-sheet-container" className="p-6 md:p-8 grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 content-start h-max">
+            {order.items.map((item: OrderItem, index: number) => (
             <div key={item.id} className={`bg-white border-2 rounded-[1.5rem] shadow-sm overflow-hidden transition-all duration-300 ${item.isCut ? 'border-emerald-500 ring-4 ring-emerald-500/5' : 'border-slate-100'}`}>
               <div className="bg-[#fcfdfe] border-b border-slate-100 px-8 py-5 flex items-center justify-between">
                 <div className="flex items-center">
@@ -306,12 +307,11 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                     <Printer size={16} className="mr-2" /> Print Item
                   </button>
                 </div>
-              </div>
-              <div className="p-10">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              </div>              <div className="p-6 md:p-8">
+                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3 sm:gap-4">
                   {item.measurements.map((meas: Measurement, i: number) => (
-                    <div key={i} className="bg-[#fcfdfe] border-2 border-slate-50 rounded-[1.2rem] py-10 px-4 text-center shadow-sm hover:border-indigo-100 transition-colors group">
-                      <p className="font-black text-[#111827] text-6xl tracking-tighter group-hover:scale-110 transition-transform duration-300">{meas.value || '-'}</p>
+                    <div key={i} className="bg-[#fcfdfe] border-2 border-slate-100 rounded-xl py-4 px-2 text-center shadow-sm hover:border-indigo-100 hover:shadow-md transition-all group flex items-center justify-center min-h-[5rem]">
+                      <p className="font-black text-[#111827] text-2xl sm:text-3xl tracking-tight group-hover:scale-110 transition-transform duration-300">{meas.value || '-'}</p>
                     </div>
                   ))}
                 </div>
@@ -324,6 +324,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               </div>
             </div>
           ))}
+          </div>
         </div>
         <div className="bg-white px-8 py-5 border-t border-slate-100 flex justify-between items-center">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 italic">VIP Tailors Cutting Management System</div>
