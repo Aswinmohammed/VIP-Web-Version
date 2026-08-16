@@ -269,6 +269,15 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
           </div>
           <div className="flex items-center gap-4">
             <button
+              onClick={() => {
+                setPrintingItemId(null);
+                setTimeout(() => window.print(), 100);
+              }}
+              className="bg-[#111827] text-white hover:bg-black px-6 py-2.5 rounded-xl font-bold text-xs flex items-center transition-all shadow-lg active:scale-95"
+            >
+              <Printer size={16} className="mr-2" /> Print All Items
+            </button>
+            <button
               onClick={handleDownloadPDF}
               disabled={isGenerating}
               className="bg-[#10b981] text-white hover:bg-[#059669] px-6 py-2.5 rounded-xl font-bold text-xs flex items-center transition-all shadow-lg shadow-emerald-500/10 disabled:opacity-50"
@@ -362,11 +371,10 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                 font-family: 'Arial', sans-serif;
                 box-sizing: border-box !important;
               }
-              .item-card { display: none; }
+              .item-card { display: none; margin-bottom: 5mm; }
               ${printingItemId 
                 ? `.card-${printingItemId.replace(/\./g, '\\.')} { display: block !important; page-break-after: auto !important; break-after: auto !important; }` 
-                : `.item-card { display: block !important; page-break-after: always; break-after: page; }
-                   .item-card:last-of-type { page-break-after: auto !important; break-after: auto !important; }`
+                : `.item-card { display: block !important; page-break-after: auto !important; break-after: auto !important; }`
               }
               .sheet-divider { border-top: 1px solid black; margin: 3mm 0; }
               .meas-display { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 700; font-size: 20px; line-height: 1.4; }
@@ -1390,13 +1398,15 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       pdf.text('Customer Name', margin + 3, yPos + 7);
       pdf.text('Phone', margin + 45, yPos + 7);
       pdf.text('Order ID', margin + 78, yPos + 7);
-      pdf.text('Due Date', margin + 105, yPos + 7);
-      pdf.text('Items', margin + 128, yPos + 7);
+      pdf.text('Items', margin + 105, yPos + 7);
       yPos += 11;
 
       // ── Table rows ──
       emergencyOrders.forEach((o, idx) => {
-        checkNewPage(10);
+        const itemsList = o.items?.map(item => `${item.dressType} (${item.quantity})`) || [];
+        const rowHeight = Math.max(9.5, itemsList.length * 4.5 + 4);
+
+        checkNewPage(rowHeight);
 
         const custName = getCustomerName(o);
         const custPhone = getCustomerPhone(o);
@@ -1404,7 +1414,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         // Zebra striping — light red tint
         if (idx % 2 === 1) {
           pdf.setFillColor(255, 241, 242); // red-50
-          pdf.rect(margin, yPos, pageWidth - margin * 2, 9.5, 'F');
+          pdf.rect(margin, yPos, pageWidth - margin * 2, rowHeight, 'F');
         }
 
         pdf.setFontSize(9);
@@ -1424,17 +1434,21 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         pdf.setFontSize(9);
         pdf.setFont('helvetica', 'normal');
         pdf.setTextColor(31, 41, 55);
-        pdf.text(o.dueDate || '-', margin + 105, yPos + 6);
-
-        const itemsText = o.items?.map(item => `${item.dressType} (${item.quantity})`).join(', ') || '';
-        const truncatedItemsText = itemsText.length > 40 ? itemsText.substring(0, 37) + '...' : itemsText;
-        pdf.text(truncatedItemsText, margin + 128, yPos + 6);
+        
+        if (itemsList.length > 0) {
+          itemsList.forEach((itemText, i) => {
+            const text = itemText.length > 50 ? itemText.substring(0, 47) + '...' : itemText;
+            pdf.text(text, margin + 105, yPos + 6 + (i * 4.5));
+          });
+        } else {
+          pdf.text('-', margin + 105, yPos + 6);
+        }
 
         pdf.setDrawColor(254, 202, 202); // red-200
         pdf.setLineDashPattern([1, 1], 0);
-        pdf.line(margin, yPos + 9.5, pageWidth - margin, yPos + 9.5);
+        pdf.line(margin, yPos + rowHeight, pageWidth - margin, yPos + rowHeight);
         pdf.setLineDashPattern([], 0);
-        yPos += 9.5;
+        yPos += rowHeight;
       });
 
       // ── Footer on every page ──
