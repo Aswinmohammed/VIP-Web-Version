@@ -218,12 +218,12 @@ const Inventory: React.FC = () => {
       const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       JsBarcode(svgEl, value, {
         format: 'CODE128',
-        width: 2.2,
-        height: 54,
+        width: 1.5,
+        height: 35,
         displayValue: true,
-        fontSize: 14,
+        fontSize: 12,
         fontOptions: "bold",
-        margin: 4,
+        margin: 2,
         background: '#ffffff',
         lineColor: '#000000',
       });
@@ -241,7 +241,7 @@ const Inventory: React.FC = () => {
   const buildLabelHtml = (item: InventoryItem): string => {
     const barcodeValue = item.barcodeValue || item.itemCode || 'UNKNOWN';
     const svgContent = generateBarcodeSvg(barcodeValue);
-    const itemName = item.name.length > 32 ? item.name.slice(0, 30) + '…' : item.name;
+    const itemName = item.name.length > 25 ? item.name.slice(0, 23) + '…' : item.name;
 
     return `<!DOCTYPE html>
 <html>
@@ -249,55 +249,59 @@ const Inventory: React.FC = () => {
   <meta charset="UTF-8" />
   <title>Label – ${barcodeValue}</title>
   <style>
-    @page { size: auto; margin: 0; }
+    @media print {
+      @page {
+        size: 2in 1in;
+        margin: 0;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%;
-      height: 100%;
       font-family: Arial, Helvetica, sans-serif;
       background: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
+      width: 2in;
+      height: 1in;
+      overflow: hidden;
     }
     .label {
+      width: 100%;
+      height: 100%;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 28px 36px;
-      gap: 12px;
-      border: 2px solid #999;
-      border-radius: 16px;
-      min-width: 340px;
-      max-width: 500px;
+      padding: 4px;
     }
     .item-name {
-      font-size: 40px;
-      font-weight: 900;
+      font-size: 11px;
+      font-weight: bold;
       color: #000;
-      line-height: 1.2;
-      max-width: 460px;
-    }
-    .barcode-num {
-      font-size: 38px;
-      font-weight: 900;
-      color: #111;
-      font-family: monospace;
-      letter-spacing: 4px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+      margin-top: 2px;
     }
     svg {
-      width: 300px;
+      max-width: 1.9in;
       height: auto;
+      max-height: 0.6in;
     }
   </style>
 </head>
 <body>
   <div class="label">
-    <div class="item-name">${itemName}</div>
     ${svgContent}
-    <div class="barcode-num">${barcodeValue}</div>
+    <div class="item-name">${itemName}</div>
   </div>
 </body>
 </html>`;

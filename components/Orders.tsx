@@ -346,7 +346,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
 
       <div id="print-template" className="hidden print:block">
         <style>{`
-            @media print {
+              @media print {
               @page { margin: 0; size: 80mm auto; }
               body * { visibility: hidden; }
               #print-template, #print-template * { visibility: visible; }
@@ -362,8 +362,12 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                 font-family: 'Arial', sans-serif;
                 box-sizing: border-box !important;
               }
-              .item-card { page-break-after: always; display: none; }
-              ${printingItemId ? `.card-${printingItemId.replace(/\./g, '\\.')} { display: block !important; }` : '.item-card { display: block !important; }'}
+              .item-card { display: none; }
+              ${printingItemId 
+                ? `.card-${printingItemId.replace(/\./g, '\\.')} { display: block !important; page-break-after: auto !important; break-after: auto !important; }` 
+                : `.item-card { display: block !important; page-break-after: always; break-after: page; }
+                   .item-card:last-of-type { page-break-after: auto !important; break-after: auto !important; }`
+              }
               .sheet-divider { border-top: 1px solid black; margin: 3mm 0; }
               .meas-display { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 700; font-size: 20px; line-height: 1.4; }
               .notes-box { width: 70mm; height: 25mm; border: 1px solid #999; margin: 2mm 0; padding: 2mm; font-size: 12px; overflow: hidden; }
@@ -384,7 +388,12 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
             <div className="sheet-divider"></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1mm' }}>
               <span className="bold" style={{ fontSize: '24px' }}>{formatOrderId(order.id)}</span>
-              {item.quality && <span className="bold" style={{ fontSize: '16px' }}>{item.quality}</span>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span className="bold" style={{ fontSize: '18px', border: '1.5px solid black', padding: '1px 4px', borderRadius: '4px', letterSpacing: '1px' }}>
+                  #{String(idx + 1).padStart(2, '0')}
+                </span>
+                {item.quality && <span className="bold" style={{ fontSize: '16px' }}>{item.quality}</span>}
+              </div>
             </div>
             <div className="text-sm">
               <div className="flex justify-between mt-1">
@@ -1379,23 +1388,18 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(255, 255, 255);
       pdf.text('Customer Name', margin + 3, yPos + 7);
-      pdf.text('Phone', margin + 52, yPos + 7);
-      pdf.text('Order ID', margin + 90, yPos + 7);
-      pdf.text('Due Date', margin + 122, yPos + 7);
-      pdf.text('Total', margin + 152, yPos + 7);
-      pdf.text('Status', pageWidth - margin - 3, yPos + 7, { align: 'right' });
+      pdf.text('Phone', margin + 45, yPos + 7);
+      pdf.text('Order ID', margin + 78, yPos + 7);
+      pdf.text('Due Date', margin + 105, yPos + 7);
+      pdf.text('Items', margin + 128, yPos + 7);
       yPos += 11;
 
       // ── Table rows ──
-      let sumTotal = 0;
-
       emergencyOrders.forEach((o, idx) => {
         checkNewPage(10);
 
         const custName = getCustomerName(o);
         const custPhone = getCustomerPhone(o);
-        const totals = calculateOrderTotals(o);
-        sumTotal += totals.finalAmount;
 
         // Zebra striping — light red tint
         if (idx % 2 === 1) {
@@ -1407,25 +1411,24 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         pdf.setTextColor(31, 41, 55);
 
         pdf.setFont('helvetica', 'bold');
-        const name = custName.length > 22 ? custName.substring(0, 19) + '...' : custName;
+        const name = custName.length > 20 ? custName.substring(0, 17) + '...' : custName;
         pdf.text(name, margin + 3, yPos + 6);
 
         pdf.setFont('helvetica', 'normal');
-        pdf.text(formatPhoneNumber(custPhone), margin + 52, yPos + 6);
+        pdf.text(formatPhoneNumber(custPhone), margin + 45, yPos + 6);
 
         pdf.setFontSize(8);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(formatOrderId(o.id), margin + 90, yPos + 6);
+        pdf.text(formatOrderId(o.id), margin + 78, yPos + 6);
 
         pdf.setFontSize(9);
         pdf.setFont('helvetica', 'normal');
         pdf.setTextColor(31, 41, 55);
-        pdf.text(o.dueDate || '-', margin + 122, yPos + 6);
-        pdf.text(`Rs. ${totals.finalAmount.toFixed(2)}`, margin + 152, yPos + 6);
+        pdf.text(o.dueDate || '-', margin + 105, yPos + 6);
 
-        pdf.setFont('helvetica', 'italic');
-        pdf.setTextColor(107, 114, 128);
-        pdf.text(o.status, pageWidth - margin - 3, yPos + 6, { align: 'right' });
+        const itemsText = o.items?.map(item => `${item.dressType} (${item.quantity})`).join(', ') || '';
+        const truncatedItemsText = itemsText.length > 40 ? itemsText.substring(0, 37) + '...' : itemsText;
+        pdf.text(truncatedItemsText, margin + 128, yPos + 6);
 
         pdf.setDrawColor(254, 202, 202); // red-200
         pdf.setLineDashPattern([1, 1], 0);
@@ -1433,20 +1436,6 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         pdf.setLineDashPattern([], 0);
         yPos += 9.5;
       });
-
-      // ── Summary ──
-      checkNewPage(25);
-      yPos += 5;
-      pdf.setDrawColor(185, 28, 28);
-      pdf.setLineWidth(0.5);
-      pdf.line(margin + 130, yPos, pageWidth - margin, yPos);
-      yPos += 7;
-
-      pdf.setFontSize(10);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(31, 41, 55);
-      pdf.text('Grand Total:', margin + 130, yPos);
-      pdf.text(`Rs. ${sumTotal.toFixed(2)}`, pageWidth - margin - 3, yPos, { align: 'right' });
 
       // ── Footer on every page ──
       const totalPages = (pdf.internal as any).pages.length - 1;
