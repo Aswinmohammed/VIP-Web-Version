@@ -360,12 +360,10 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               body * { visibility: hidden; }
               #print-template, #print-template * { visibility: visible; }
               #print-template {
-                position: absolute;
-                left: 0;
-                top: 0;
+                position: relative !important;
+                margin: 0 auto !important;
                 width: 72mm !important; /* Adjusted for printer margins: 72mm is safer for 80mm paper */
                 padding: 2mm !important;
-                margin: 0 !important;
                 background: white;
                 color: black;
                 font-family: 'Arial', sans-serif;
@@ -1478,6 +1476,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
 
   return (
     <div className="space-y-6">
+      <div className="print:hidden space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
         <h1 className="text-4xl font-bold text-gray-800">Orders</h1>
         {showAddOrderButton && (
@@ -1728,6 +1727,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
             )}
           </tbody>
         </table>
+      </div>
       </div>
 
       {viewingMeasurementsOrder && (
