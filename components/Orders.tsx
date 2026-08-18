@@ -196,17 +196,19 @@ const PackingSmsModal: React.FC<PackingSmsModalProps> = ({
   );
 };
 
-const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: () => void; onToggleCut: (itemId: string) => void; onUpdateStatus: (status: Order['status']) => void }> = ({
+const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: () => void; onToggleCut: (itemId: string) => void; onMarkAllCut?: () => void; onUpdateStatus: (status: Order['status']) => void }> = ({
   order,
   customerName,
   onClose,
   onToggleCut,
+  onMarkAllCut,
   onUpdateStatus
 }: {
   order: Order;
   customerName: string;
   onClose: () => void;
   onToggleCut: (itemId: string) => void;
+  onMarkAllCut?: () => void;
   onUpdateStatus: (status: Order['status']) => void;
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -271,6 +273,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
             <button
               onClick={() => {
                 setPrintingItemId(null);
+                if (onMarkAllCut) onMarkAllCut();
                 setTimeout(() => window.print(), 100);
               }}
               className="bg-[#111827] text-white hover:bg-black px-6 py-2.5 rounded-xl font-bold text-xs flex items-center transition-all shadow-lg active:scale-95"
@@ -360,8 +363,10 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               body * { visibility: hidden; }
               #print-template, #print-template * { visibility: visible; }
               #print-template {
-                position: relative !important;
-                margin: 0 auto !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                margin: 0 !important;
                 width: 72mm !important; /* Adjusted for printer margins: 72mm is safer for 80mm paper */
                 padding: 2mm !important;
                 background: white;
@@ -372,7 +377,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               .item-card { display: none; margin-bottom: 5mm; }
               ${printingItemId 
                 ? `.card-${printingItemId.replace(/\./g, '\\.')} { display: block !important; page-break-after: auto !important; break-after: auto !important; }` 
-                : `.item-card { display: block !important; page-break-after: auto !important; break-after: auto !important; }`
+                : `.item-card { display: block !important; page-break-after: always !important; break-after: page !important; }`
               }
               .sheet-divider { border-top: 1px solid black; margin: 3mm 0; }
               .meas-display { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 700; font-size: 20px; line-height: 1.4; }
@@ -406,7 +411,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                 <span><span className="bold">Name:</span> {customerName}</span>
               </div>
               <div className="flex justify-between mt-1">
-                <span><span className="bold">Type:</span> {idx + 1} {item.dressType}</span>
+                <span><span className="bold">Type:</span> {item.dressType}</span>
                 <span><span className="bold">Qty:</span> <span className="bold">{item.quantity}</span></span>
               </div>
               <div className="mt-1">
@@ -1068,7 +1073,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         if (cancelled) return;
         // Apply Emergency pseudo-filter client-side (exclude Delivered and Packed — emergency mark is cleared for those)
         const filtered = statusFilter === 'Emergency'
-          ? results.filter((o) => o.emergency && o.status !== 'Delivered' && o.status !== 'Packed')
+          ? results.filter((o) => o.emergency && o.status !== 'Delivered' && o.status !== 'Packed' && o.status !== 'Due')
           : results;
         setSearchResults(filtered);
         setIsSearching(false);
@@ -1137,6 +1142,27 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       }
     } catch (e) {
       console.error('Failed to persist cut toggle:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save changes. Please try again.');
+    }
+  };
+
+  const handleMarkAllCut = async () => {
+    if (!viewingMeasurementsOrder) return;
+    const updatedOrder = {
+      ...viewingMeasurementsOrder,
+      items: viewingMeasurementsOrder.items.map(item => ({ ...item, isCut: true }))
+    };
+    // Optimistic update
+    setOrders(prevOrders => prevOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    setViewingMeasurementsOrder(updatedOrder);
+    // Persist to backend
+    try {
+      if (context.saveOrder) {
+        await context.saveOrder(updatedOrder);
+      }
+    } catch (e) {
+      console.error('Failed to persist mark all cut:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save changes. Please try again.');
     }
   };
 
@@ -1153,6 +1179,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
       }
     } catch (e) {
       console.error('Failed to persist status update:', e);
+      alert(e instanceof Error ? e.message : 'Failed to save status. Please try again.');
     }
   };
 
@@ -1651,7 +1678,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
                     <div className="text-emerald-600 font-bold text-[13px]">{formatPhoneNumber(getCustomerPhone(order))}</div>
                   </td>
                   <td className="px-6 py-4 text-gray-500">{order.orderDate}</td>
-                  <td className="px-6 py-4 text-gray-500">{order.dueDate || '-'}{order.emergency && order.status !== 'Delivered' && order.status !== 'Packed' && <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">Emergency</span>}</td>
+                  <td className="px-6 py-4 text-gray-500">{order.dueDate || '-'}{order.emergency && order.status !== 'Delivered' && order.status !== 'Packed' && order.status !== 'Due' && <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold">Emergency</span>}</td>
                   <td className="px-6 py-4 font-bold text-gray-900">Rs. {calculateOrderTotals(order).finalAmount.toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -1736,6 +1763,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
           customerName={getCustomerName(viewingMeasurementsOrder)}
           onClose={() => setViewingMeasurementsOrder(null)}
           onToggleCut={handleToggleCut}
+          onMarkAllCut={handleMarkAllCut}
           onUpdateStatus={handleUpdateStatus}
         />
       )}
