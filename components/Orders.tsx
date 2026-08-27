@@ -401,7 +401,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               <span className="bold" style={{ fontSize: '24px' }}>{formatOrderId(order.id)}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span className="bold" style={{ fontSize: '18px', border: '1.5px solid black', padding: '1px 4px', borderRadius: '4px', letterSpacing: '1px' }}>
-                  #{ String(item.itemIndex !== undefined ? item.itemIndex + 1 : idx + 1).padStart(2, \'0\') }
+                  #{ String(item.itemIndex !== undefined ? item.itemIndex + 1 : idx + 1).padStart(2, '0') }
                 </span>
                 {item.quality && <span className="bold" style={{ fontSize: '16px' }}>{item.quality}</span>}
               </div>
