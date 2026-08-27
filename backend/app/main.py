@@ -157,8 +157,7 @@ def ensure_order_item_index_column() -> None:
         for statement in statements:
             connection.execute(text(statement))
 
-def ensure_order_item_index_column()
-    ensure_employee_salary_columns() -> None:
+def ensure_employee_salary_columns() -> None:
     inspector = inspect(engine)
     if not _table_exists(inspector, "employees"):
         return
@@ -868,6 +867,7 @@ async def lifespan(_: FastAPI):
     if settings.create_tables_on_startup:
         Base.metadata.create_all(bind=engine)
     ensure_branch_access_columns()
+    ensure_order_item_index_column()
     ensure_employee_salary_columns()
     ensure_master_admin_rls_visibility()
     normalize_order_status_data()
