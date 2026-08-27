@@ -107,6 +107,7 @@ type ApiOrderItem = {
   stitch_fee?: number | null;
   quantity: number;
   price_per_unit: number;
+  item_index?: number;
   note?: string | null;
   is_cut: boolean;
   quality?: string | null;
@@ -575,6 +576,7 @@ function toOrderItem(item: ApiOrderItem, measurementsByLegacyId: Map<string, Mea
     stitchFee: item.stitch_fee != null ? Number(item.stitch_fee) : 0,
     quantity: item.quantity,
     pricePerUnit: Number(item.price_per_unit),
+    itemIndex: item.item_index ?? i,
     measurements: directMeasurements.length > 0 ? directMeasurements : measurementsByLegacyId.get(clientId) || [],
     note: item.note ?? '',
     isCut: item.is_cut,
@@ -937,6 +939,7 @@ function fromOrder(order: Order) {
       stitch_fee: Number(item.stitchFee || 0),
       quantity: Number(item.quantity || 0),
       price_per_unit: Number(item.pricePerUnit || 0),
+      item_index: item.itemIndex ?? i,
       measurements: (item.measurements || []).map((measurement, index) => ({
         id: measurement.id,
         name: measurement.name,

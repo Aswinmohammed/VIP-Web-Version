@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
@@ -211,6 +211,7 @@ def _serialize_order(order: Order, include_measurements: bool = True) -> dict:
                 "stitch_fee": item.stitch_fee,
                 "quantity": item.quantity,
                 "price_per_unit": item.price_per_unit,
+                "item_index": item.item_index,
                 "note": item.note,
                 "is_cut": item.is_cut,
                 "quality": item.quality,
@@ -376,6 +377,7 @@ def _replace_order_payload(db: Session, actor: AuthenticatedActor, order: Order,
             stitch_fee=item_payload.stitch_fee,
             quantity=item_payload.quantity,
             price_per_unit=item_payload.price_per_unit,
+            item_index=item_payload.item_index,
             note=item_payload.note,
             is_cut=item_payload.is_cut,
             quality=item_payload.quality,
@@ -610,6 +612,7 @@ def create_order(
             stitch_fee=item_payload.stitch_fee,
             quantity=item_payload.quantity,
             price_per_unit=item_payload.price_per_unit,
+            item_index=item_payload.item_index,
             note=item_payload.note,
             is_cut=item_payload.is_cut,
             quality=item_payload.quality,
@@ -679,7 +682,9 @@ def update_order(
     
     # Deduct stock for new items if order is not cancelled
     if payload.status != OrderStatus.CANCELLED:
-        _adjust_inventory_for_order_items(db, actor, list(order.items), is_restore=False)
+        # Fetch newly created items since order.items relation isn't automatically updated after flush
+        new_items = db.scalars(select(OrderItem).where(OrderItem.order_id == order.id)).all()
+        _adjust_inventory_for_order_items(db, actor, list(new_items), is_restore=False)
         
     db.commit()
     loaded_order = _get_order_or_404(db, actor, order_id)

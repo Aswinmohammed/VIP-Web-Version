@@ -146,7 +146,19 @@ def ensure_branch_access_columns() -> None:
             connection.execute(text(statement))
 
 
-def ensure_employee_salary_columns() -> None:
+def ensure_order_item_index_column() -> None:
+    inspector = inspect(engine)
+    if not _table_exists(inspector, "order_items"):
+        return
+    statements = [
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_index INTEGER NOT NULL DEFAULT 0",
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+def ensure_order_item_index_column()
+    ensure_employee_salary_columns() -> None:
     inspector = inspect(engine)
     if not _table_exists(inspector, "employees"):
         return

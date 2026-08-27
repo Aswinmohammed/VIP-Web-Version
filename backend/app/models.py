@@ -197,7 +197,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixi
 
     customer: Mapped["Customer"] = relationship(back_populates="orders")
     branch_rel: Mapped["Branch"] = relationship(back_populates="orders")
-    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan", order_by="OrderItem.created_at")
+    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan", order_by="OrderItem.item_index")
     payments: Mapped[list["Payment"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     measurement_sets: Mapped[list["MeasurementSet"]] = relationship(back_populates="order")
 
@@ -215,6 +215,7 @@ class OrderItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyId
     stitch_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price_per_unit: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    item_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_cut: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     quality: Mapped[str | None] = mapped_column(String(120), nullable=True)

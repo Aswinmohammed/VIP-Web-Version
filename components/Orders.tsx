@@ -299,7 +299,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
             <div key={item.id} className={`bg-white border-2 rounded-[1.5rem] shadow-sm overflow-hidden transition-all duration-300 ${item.isCut ? 'border-emerald-500 ring-4 ring-emerald-500/5' : 'border-slate-100'}`}>
               <div className="bg-[#fcfdfe] border-b border-slate-100 px-8 py-5 flex items-center justify-between">
                 <div className="flex items-center">
-                  <span className="bg-[#111827] text-white rounded-lg w-9 h-9 flex items-center justify-center mr-4 font-black text-sm shadow-md">{index + 1}</span>
+                  <span className="bg-[#111827] text-white rounded-lg w-9 h-9 flex items-center justify-center mr-4 font-black text-sm shadow-md">{item.itemIndex !== undefined ? item.itemIndex + 1 : index + 1}</span>
                   <h3 className="font-black text-[#111827] uppercase tracking-tight text-xl">{item.dressType}</h3>
                 </div>
                 <div className="flex items-center gap-3">
@@ -401,7 +401,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
               <span className="bold" style={{ fontSize: '24px' }}>{formatOrderId(order.id)}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span className="bold" style={{ fontSize: '18px', border: '1.5px solid black', padding: '1px 4px', borderRadius: '4px', letterSpacing: '1px' }}>
-                  #{String(idx + 1).padStart(2, '0')}
+                  #{ String(item.itemIndex !== undefined ? item.itemIndex + 1 : idx + 1).padStart(2, \'0\') }
                 </span>
                 {item.quality && <span className="bold" style={{ fontSize: '16px' }}>{item.quality}</span>}
               </div>

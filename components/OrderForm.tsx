@@ -564,7 +564,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   };
 
   const addItem = () => {
-    const newItem: OrderItem = { id: createClientId('ITEM'), dressType: '', inventoryItemId: '', clothCode: '', clothName: '', clothSize: 0, stitchFee: 0, quantity: 1, pricePerUnit: 0, measurements: [], note: '' };
+    const nextIndex = order.items.length > 0 ? Math.max(...order.items.map(item => item.itemIndex ?? 0)) + 1 : 0;
+    const newItem: OrderItem = { id: createClientId('ITEM'), dressType: '', itemIndex: nextIndex, inventoryItemId: '', clothCode: '', clothName: '', clothSize: 0, stitchFee: 0, quantity: 1, pricePerUnit: 0, measurements: [], note: '' };
     markDirty();
     setOrder(prev => ({ ...prev, items: [...prev.items, newItem] }));
   };

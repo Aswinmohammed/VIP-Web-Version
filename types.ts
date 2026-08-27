@@ -168,6 +168,7 @@ export interface OrderItem {
   stitchFee?: number;
   quantity: number;
   pricePerUnit: number;
+  itemIndex?: number;
   measurements: Measurement[];
   note?: string;
   isCut?: boolean;

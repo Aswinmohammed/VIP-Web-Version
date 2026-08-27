@@ -200,6 +200,7 @@ class OrderItemInput(BaseModel):
     stitch_fee: Decimal = Field(default=Decimal("0.00"), ge=0)
     quantity: int = Field(ge=1)
     price_per_unit: Decimal = Field(ge=0)
+    item_index: int = 0
     measurements: list[MeasurementValueInput] = Field(default_factory=list)
     note: str | None = None
     is_cut: bool = False
@@ -220,6 +221,7 @@ class OrderItemRead(ORMModel):
     stitch_fee: Decimal
     quantity: int
     price_per_unit: Decimal
+    item_index: int = 0
     note: str | None
     is_cut: bool
     quality: str | None
