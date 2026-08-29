@@ -562,7 +562,7 @@ function toMeasurement(measurement: ApiMeasurementValue): Measurement {
   };
 }
 
-function toOrderItem(item: ApiOrderItem, measurementsByLegacyId: Map<string, Measurement[]>): OrderItem {
+function toOrderItem(item: ApiOrderItem, measurementsByLegacyId: Map<string, Measurement[]>, index: number = 0): OrderItem {
   const clientId = item.legacy_id || item.id;
   const directMeasurements = (item.measurements || []).map(toMeasurement);
   return {
@@ -576,7 +576,7 @@ function toOrderItem(item: ApiOrderItem, measurementsByLegacyId: Map<string, Mea
     stitchFee: item.stitch_fee != null ? Number(item.stitch_fee) : 0,
     quantity: item.quantity,
     pricePerUnit: Number(item.price_per_unit),
-    itemIndex: item.item_index ?? i,
+    itemIndex: item.item_index ?? index,
     measurements: directMeasurements.length > 0 ? directMeasurements : measurementsByLegacyId.get(clientId) || [],
     note: item.note ?? '',
     isCut: item.is_cut,
@@ -619,7 +619,7 @@ function toOrder(order: ApiOrder): Order {
     orderDate: order.order_date,
     dueDate: order.due_date ?? '',
     status: order.status,
-    items: order.items.map((item) => toOrderItem(item, measurementsByLegacyId)),
+    items: order.items.map((item, index) => toOrderItem(item, measurementsByLegacyId, index)),
     discount: Number(order.discount),
     advance: Number(order.advance),
     payments: order.payments.map(toPayment),
@@ -929,7 +929,7 @@ function fromOrder(order: Order) {
     called_timestamp: order.calledTimestamp || null,
     call_history: order.callHistory || [],
     bag_count: order.bagCount ?? null,
-    items: order.items.map((item) => ({
+    items: order.items.map((item, i) => ({
       id: item.id,
       dress_type: item.dressType,
       inventory_item_id: isUuid(item.inventoryItemId) ? item.inventoryItemId : null,
