@@ -6,7 +6,7 @@ from decimal import Decimal
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
@@ -56,12 +56,50 @@ def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
     return bool(branch and branch.is_production_hub)
 
 
-def _apply_inventory_scope(stmt, db: Session, actor: AuthenticatedActor, branch_id: uuid.UUID | None = None):
+def _is_str_branch(branch: Branch | None) -> bool:
+    if branch is None:
+        return False
+    code = (branch.code or "").strip().upper()
+    name = (branch.name or "").strip().upper()
+    return code == "STR" or "STR" in name
+
+
+def _get_kalmunai_branch_id(db: Session, actor: AuthenticatedActor) -> uuid.UUID | None:
+    return db.scalar(
+        select(Branch.id)
+        .where(
+            Branch.tenant_id == actor.tenant_id,
+            or_(
+                Branch.code.ilike("KLM"),
+                Branch.name.ilike("%Kalmunai%"),
+            ),
+        )
+        .order_by(Branch.is_production_hub.desc(), Branch.name.asc())
+        .limit(1)
+    )
+
+
+def _get_actor_branch(db: Session, actor: AuthenticatedActor) -> Branch | None:
+    if actor.branch_id is None:
+        return None
+    return db.scalar(select(Branch).where(Branch.id == actor.branch_id, Branch.tenant_id == actor.tenant_id))
+
+
+def _apply_inventory_scope(stmt, db: Session, actor: AuthenticatedActor, branch_id: uuid.UUID | None = None, include_shared: bool = False):
     if _has_production_access(db, actor):
         stmt = stmt.where(InventoryItem.tenant_id == actor.tenant_id)
         if branch_id is not None:
             stmt = stmt.where(InventoryItem.branch_id == branch_id)
         return stmt
+    if include_shared:
+        actor_branch = _get_actor_branch(db, actor)
+        kalmunai_branch_id = _get_kalmunai_branch_id(db, actor) if _is_str_branch(actor_branch) else None
+        if kalmunai_branch_id is not None:
+            scoped_branch_id = resolve_branch_scope(actor, branch_id)
+            return stmt.where(
+                InventoryItem.tenant_id == actor.tenant_id,
+                InventoryItem.branch_id.in_([scoped_branch_id, kalmunai_branch_id]),
+            )
     return apply_branch_scope(stmt, InventoryItem, actor, branch_id)
 
 
@@ -78,22 +116,56 @@ def _get_inventory_item_or_404(db: Session, actor: AuthenticatedActor, item_id: 
     return item
 
 
+def _serialize_inventory_item(item: InventoryItem, branch_names: dict[uuid.UUID, str]) -> dict:
+    return {
+        "id": item.id,
+        "tenant_id": item.tenant_id,
+        "legacy_id": item.legacy_id,
+        "branch_id": item.branch_id,
+        "branch_name": branch_names.get(item.branch_id),
+        "item_code": item.item_code,
+        "barcode_value": item.barcode_value,
+        "name": item.name,
+        "category": item.category,
+        "quantity": item.quantity,
+        "unit_price": item.unit_price,
+        "mrp": item.mrp,
+        "wholesale_price": item.wholesale_price,
+        "last_updated": item.last_updated,
+        "is_active": item.is_active,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+def _serialize_inventory_items(db: Session, items: list[InventoryItem]) -> list[dict]:
+    branch_ids = {item.branch_id for item in items}
+    if not branch_ids:
+        return []
+    branch_names = {
+        branch.id: branch.name
+        for branch in db.scalars(select(Branch).where(Branch.id.in_(branch_ids)))
+    }
+    return [_serialize_inventory_item(item, branch_names) for item in items]
+
+
 @router.get("", response_model=list[InventoryItemRead])
 def list_inventory(
     branch_id: uuid.UUID | None = Query(default=None),
     is_active: bool | None = Query(default=None),
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
-) -> list[InventoryItem]:
+) -> list[dict]:
     stmt = _apply_inventory_scope(
         select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast(), InventoryItem.name.asc()),
         db,
         actor,
         branch_id,
+        include_shared=True,
     )
     if is_active is not None:
         stmt = stmt.where(InventoryItem.is_active == is_active)
-    return list(db.scalars(stmt))
+    return _serialize_inventory_items(db, list(db.scalars(stmt)))
 
 
 @router.get("/search", response_model=list[InventoryItemRead])
@@ -104,13 +176,14 @@ def search_inventory(
     branch_id: uuid.UUID | None = Query(default=None),
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
-) -> list[InventoryItem]:
+) -> list[dict]:
     """Search inventory by barcode value, item code, or name (for scanner integration)."""
     stmt = _apply_inventory_scope(
         select(InventoryItem).order_by(InventoryItem.item_code.asc().nullslast()),
         db,
         actor,
         branch_id,
+        include_shared=True,
     )
     if barcode:
         stmt = stmt.where(InventoryItem.barcode_value.ilike(f"%{barcode.strip()}%"))
@@ -118,7 +191,7 @@ def search_inventory(
         stmt = stmt.where(InventoryItem.item_code.ilike(f"%{item_code.strip()}%"))
     if name:
         stmt = stmt.where(InventoryItem.name.ilike(f"%{name.strip()}%"))
-    return list(db.scalars(stmt))
+    return _serialize_inventory_items(db, list(db.scalars(stmt)))
 
 
 @router.post("", response_model=InventoryItemRead, status_code=status.HTTP_201_CREATED)

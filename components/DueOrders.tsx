@@ -3,7 +3,7 @@ import { AppContext } from '../context/AppContext';
 import { Order, Page } from '../types';
 import { Phone, Edit, DollarSign, X, Search, Filter, Printer, Download, Loader2, Eye, MessageSquare, Send } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { sendCloudOrderSms, addCloudPayment } from '../utils/cloudApi';
+import { sendCloudOrderSms, sendCloudDueOrdersSms, addCloudPayment } from '../utils/cloudApi';
 import { downloadDataUri } from '../utils/downloads';
 import { calculateOrderTotals } from '../utils/orderUtils';
 
@@ -440,6 +440,7 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
   const [selectedSmsOrder, setSelectedSmsOrder] = useState<Order | null>(null);
   const [dueListModalOpen, setDueListModalOpen] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isSendingAllDueSms, setIsSendingAllDueSms] = useState(false);
 
   if (!context) return <div>Loading...</div>;
   const { orders, setOrders, customers, currentUser, activeBranchId, accessToken, branches, isCloudMode } = context;
@@ -546,6 +547,40 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
     }
 
     alert(`SMS sent successfully to ${formatPhoneNumber(result.phoneNormalized || phone)}.`);
+  };
+
+  const handleSendAllDueSms = async () => {
+    if (isSendingAllDueSms) return;
+    if (!isCloudMode || !accessToken) {
+      alert('SMS sending is available only in cloud mode.');
+      return;
+    }
+    if (dueOrders.length === 0) {
+      alert('No due-order customers are currently eligible for SMS.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Send SMS to all due-order customers?\n\nThis will send payment reminder SMS messages to ${dueOrders.length} customers.`
+    );
+    if (!confirmed) return;
+
+    const orderIds = dueOrders.map((order) => order.serverId).filter((id): id is string => Boolean(id));
+    if (orderIds.length === 0) {
+      alert('No saved due orders are available for bulk SMS.');
+      return;
+    }
+
+    setIsSendingAllDueSms(true);
+    try {
+      const result = await sendCloudDueOrdersSms(accessToken, { orderIds });
+      alert(`Due Order SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed / Skipped: ${result.failed + result.skipped}`);
+    } catch (error) {
+      console.error('Failed to send bulk due SMS', error);
+      alert(error instanceof Error ? error.message : 'Bulk due SMS failed.');
+    } finally {
+      setIsSendingAllDueSms(false);
+    }
   };
 
   const handleSubmitCollection = async (amount: number, date: string, method: string, note: string) => {
@@ -701,6 +736,14 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
           <div>
             <p className="text-sm text-red-600 font-semibold">Total Due: <span className="text-xl font-black text-red-700">Rs. {dueOrders.reduce((sum, o) => sum + computeFinal(o).balance, 0).toFixed(2)}</span></p>
           </div>
+          <button
+            onClick={handleSendAllDueSms}
+            disabled={isSendingAllDueSms || dueOrders.length === 0}
+            className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-black disabled:opacity-50 font-bold transition-all flex items-center gap-2 text-sm"
+          >
+            {isSendingAllDueSms ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            {isSendingAllDueSms ? 'Sending...' : 'Send All'}
+          </button>
           <button
             onClick={() => setDueListModalOpen(true)}
             className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold transition-all flex items-center gap-2 text-sm"

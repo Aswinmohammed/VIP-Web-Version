@@ -77,9 +77,14 @@ function parseFlexibleNumber(value: string): number {
 
 const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const context = useContext(AppContext);
-  const { customers, orders, setOrders, inventory, activeBranchId, currentUser, accessToken, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope } = context!;
+  const { customers, orders, setOrders, inventory, activeBranchId, currentUser, accessToken, currentBranch, settings, setSettings, saveCustomer, saveOrder, canUseOrderAction, isAllBranchesScope, getBranchName } = context!;
   const canManageProductionStatuses = isAllBranchesScope || currentBranch?.isProductionHub || canUseOrderAction('track_completion');
   const blockedStatusValues: Order['status'][] = ['In Progress', 'Completed', 'Packed'];
+  const isSharedInventoryItem = (item: { branchId: string }) => (
+    currentUser?.role === 'branch_admin' &&
+    Boolean(currentUser.branchId) &&
+    item.branchId !== currentUser.branchId
+  );
   const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
   const availableStatusOptions: Array<{ value: Order['status']; label: string; disabled?: boolean }> = [
     { value: 'Pending', label: 'Pending' },
@@ -328,12 +333,24 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   }, [currentBranch?.isProductionHub, customerSearch, customers, order.branchId, orders]);
 
 
-  const loadOrderDetails = (oldOrder: Order) => {
+  const loadOrderDetails = async (oldOrder: Order) => {
+    let orderWithMeasurements = oldOrder;
+    if (oldOrder.measurementsLoaded === false && oldOrder.serverId && accessToken) {
+      try {
+        orderWithMeasurements = await fetchCloudOrder(accessToken, oldOrder.serverId);
+        setOrders((currentOrders) => currentOrders.map((currentOrder) => (
+          currentOrder.id === oldOrder.id ? orderWithMeasurements : currentOrder
+        )));
+      } catch (error) {
+        console.error('Failed to load previous order measurements:', error);
+      }
+    }
+
     const customer = customers.find(c => c.id === oldOrder.customerId);
     if (!customer) return;
 
     // Deep clone items with fresh IDs but same measurements, quantities, and prices
-    const clonedItems: OrderItem[] = oldOrder.items.map(item => ({
+    const clonedItems: OrderItem[] = orderWithMeasurements.items.map(item => ({
       ...item,
       id: createClientId('ITEM'),
       measurements: item.measurements.map(m => ({
@@ -349,20 +366,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     markDirty();
     setOrder(prev => ({
       ...prev,
-      customerId: oldOrder.customerId,
+      customerId: orderWithMeasurements.customerId,
       items: clonedItems,
       status: 'Pending', // New order is always Pending
-      discount: oldOrder.discount || 0,
+      discount: orderWithMeasurements.discount || 0,
       advance: 0,
       payments: []
     }));
     setDiscountMode('amount');
-    setDiscountInput(String(oldOrder.discount || 0));
+    setDiscountInput(String(orderWithMeasurements.discount || 0));
     setCustomerSearch(customer.name);
     setShowCustomerDropdown(false);
   };
 
-  const selectCustomer = (customer: Customer) => {
+  const selectCustomer = async (customer: Customer) => {
     const newCustomerId = customer.id;
     markDirty();
     setOrder(prev => ({ ...prev, customerId: newCustomerId }));
@@ -376,7 +393,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     if (customerOrders.length > 0) {
       const lastOrder = customerOrders[0];
       if (window.confirm(`This customer has a previous order. Would you like to load its details into this new form for faster processing?`)) {
-        loadOrderDetails(lastOrder);
+        await loadOrderDetails(lastOrder);
       }
     }
   };
@@ -1046,6 +1063,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                               <div className="text-sm font-bold text-gray-800 group-hover:text-indigo-700">{inv.name}</div>
                               <div className="flex justify-between items-center text-xs text-gray-500 mt-0.5">
                                 <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{inv.itemCode || '—'}</span>
+                                {isSharedInventoryItem(inv) && (
+                                  <span className="font-bold text-slate-500">From {inv.branchName || getBranchName(inv.branchId)}</span>
+                                )}
                                 <span>Stock: <span className={(inv.quantity || 0) > 0 ? "text-green-600 font-bold" : "text-red-500 font-bold"}>{inv.quantity || 0}</span></span>
                                 <span className="font-bold text-indigo-600">Rs. {inv.wholesalePrice || inv.mrp || inv.unitPrice || 0}</span>
                               </div>

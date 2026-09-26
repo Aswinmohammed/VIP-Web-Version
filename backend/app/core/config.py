@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     ])
     cors_allow_methods: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE", "OPTIONS"])
     cors_allow_headers: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["Authorization", "Content-Type"])
-    invoice_company_name: str = "VIP Tailors & Fashion Pvt Ltd"
+    invoice_company_name: str = "VIP Tailors & Fashion (PVT) LTD"
     invoice_currency: str = "LKR"
 
     @field_validator("environment", mode="before")

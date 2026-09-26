@@ -11,6 +11,7 @@ ALTER TABLE material_sale_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_work_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_salary_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE supplier_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE supplier_payments ENABLE ROW LEVEL SECURITY;
@@ -56,6 +57,8 @@ DROP POLICY IF EXISTS tenant_branch_isolation_employee_work_logs ON employee_wor
 CREATE POLICY tenant_branch_isolation_employee_work_logs ON employee_work_logs USING (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), ''))) WITH CHECK (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')));
 DROP POLICY IF EXISTS tenant_branch_isolation_employee_salary_payments ON employee_salary_payments;
 CREATE POLICY tenant_branch_isolation_employee_salary_payments ON employee_salary_payments USING (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), ''))) WITH CHECK (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')));
+DROP POLICY IF EXISTS tenant_branch_isolation_employee_attendance ON employee_attendance;
+CREATE POLICY tenant_branch_isolation_employee_attendance ON employee_attendance USING (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), ''))) WITH CHECK (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')));
 DROP POLICY IF EXISTS tenant_branch_isolation_suppliers ON suppliers;
 CREATE POLICY tenant_branch_isolation_suppliers ON suppliers USING (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), ''))) WITH CHECK (tenant_id::text = NULLIF(current_setting('app.current_tenant_id', true), '') AND (NULLIF(current_setting('app.current_role', true), '') = 'master_admin' OR branch_id::text = NULLIF(current_setting('app.current_branch_id', true), '')));
 DROP POLICY IF EXISTS tenant_branch_isolation_supplier_purchases ON supplier_purchases;

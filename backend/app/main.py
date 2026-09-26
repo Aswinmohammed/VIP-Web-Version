@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
 from backend.app.database import SessionLocal, engine, get_db
-from backend.app.models import Base, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
+from backend.app.models import Base, EmployeeAttendance, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
 from backend.app.services.files import save_json_backup, save_pdf_export
 from backend.app.services.sms import process_sms_queue
 from backend.app.dependencies import AuthenticatedActor, get_current_actor
@@ -189,6 +189,10 @@ def ensure_employee_salary_columns() -> None:
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+
+def ensure_employee_attendance_support() -> None:
+    Base.metadata.create_all(bind=engine, tables=[EmployeeAttendance.__table__])
 
 
 def ensure_order_status_support() -> None:
@@ -775,6 +779,7 @@ def ensure_master_admin_rls_visibility() -> None:
         "employees",
         "employee_work_logs",
         "employee_salary_payments",
+        "employee_attendance",
         "suppliers",
         "supplier_purchases",
         "supplier_payments",
@@ -869,6 +874,7 @@ async def lifespan(_: FastAPI):
     ensure_branch_access_columns()
     ensure_order_item_index_column()
     ensure_employee_salary_columns()
+    ensure_employee_attendance_support()
     ensure_master_admin_rls_visibility()
     normalize_order_status_data()
     normalize_user_role_data()

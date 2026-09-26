@@ -5,6 +5,7 @@ import {
   CurrentUser,
   Customer,
   Employee,
+  EmployeeAttendance,
   Expense,
   InventoryItem,
   MaterialSale,
@@ -15,6 +16,7 @@ import {
   Payment,
   SalaryPayment,
   SmsAnalytics,
+  SmsBulkPackedOrderSendResult,
   SmsCampaign,
   SmsCampaignFilter,
   SmsCampaignPreview,
@@ -29,6 +31,7 @@ import {
   SupplierPayment,
   SupplierPurchase,
   TenantUser,
+  TodayCheckedInEmployee,
   WorkLog,
 } from '../types';
 
@@ -164,6 +167,7 @@ type ApiProductionNotification = {
 type ApiInventoryItem = {
   id: string;
   branch_id: string;
+  branch_name?: string | null;
   item_code?: string | null;
   barcode_value?: string | null;
   name: string;
@@ -252,6 +256,24 @@ type ApiEmployee = {
   joined_date?: string | null;
   work_logs: ApiEmployeeWorkLog[];
   salary_payments: ApiEmployeeSalaryPayment[];
+};
+
+type ApiEmployeeAttendance = {
+  id?: string | null;
+  employee_id: string;
+  employee_name: string;
+  branch_id: string;
+  attendance_date: string;
+  check_in_at?: string | null;
+  check_out_at?: string | null;
+  worked_days: number;
+};
+
+type ApiTodayCheckedInEmployee = {
+  employee_id: string;
+  employee_name: string;
+  branch_id: string;
+  check_in_at: string;
 };
 
 type ApiSupplierPurchase = {
@@ -369,6 +391,14 @@ type ApiSmsManualSendResponse = {
   provider_message_id?: string | null;
   segment_count: number;
   estimated_cost: number | string;
+  message: string;
+};
+
+type ApiSmsBulkPackedOrderSendResponse = {
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
   message: string;
 };
 
@@ -636,6 +666,7 @@ function toInventoryItem(item: ApiInventoryItem): InventoryItem {
   return {
     id: item.id,
     branchId: item.branch_id,
+    branchName: item.branch_name ?? undefined,
     itemCode: item.item_code ?? '',
     barcodeValue: item.barcode_value ?? item.item_code ?? '',
     name: item.name,
@@ -728,6 +759,28 @@ function toEmployee(employee: ApiEmployee): Employee {
     joinedDate: employee.joined_date ?? '',
     workLogs: employee.work_logs.map(toWorkLog),
     salaryPayments: employee.salary_payments.map(toSalaryPayment),
+  };
+}
+
+function toEmployeeAttendance(attendance: ApiEmployeeAttendance): EmployeeAttendance {
+  return {
+    id: attendance.id ?? undefined,
+    employeeId: attendance.employee_id,
+    employeeName: attendance.employee_name,
+    branchId: attendance.branch_id,
+    date: attendance.attendance_date,
+    checkInAt: attendance.check_in_at ?? null,
+    checkOutAt: attendance.check_out_at ?? null,
+    workedDays: attendance.worked_days,
+  };
+}
+
+function toTodayCheckedInEmployee(employee: ApiTodayCheckedInEmployee): TodayCheckedInEmployee {
+  return {
+    employeeId: employee.employee_id,
+    employeeName: employee.employee_name,
+    branchId: employee.branch_id,
+    checkInAt: employee.check_in_at,
   };
 }
 
@@ -859,6 +912,16 @@ function toSmsManualSendResult(result: ApiSmsManualSendResponse): SmsManualSendR
     providerMessageId: result.provider_message_id ?? undefined,
     segmentCount: result.segment_count,
     estimatedCost: toNumericValue(result.estimated_cost),
+    message: result.message,
+  };
+}
+
+function toSmsBulkPackedOrderSendResult(result: ApiSmsBulkPackedOrderSendResponse): SmsBulkPackedOrderSendResult {
+  return {
+    total: result.total,
+    sent: result.sent,
+    failed: result.failed,
+    skipped: result.skipped,
     message: result.message,
   };
 }
@@ -1413,6 +1476,39 @@ export async function fetchCloudEmployees(token: string, branchId?: string): Pro
   return response.map(toEmployee);
 }
 
+export async function fetchCloudTodayAttendance(token: string, branchId?: string): Promise<EmployeeAttendance[]> {
+  const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+  const response = await apiRequest<ApiEmployeeAttendance[]>(`/employees/attendance/today${query}`, { headers: jsonHeaders(token) });
+  return response.map(toEmployeeAttendance);
+}
+
+export async function checkInCloudEmployee(token: string, employeeId: string): Promise<EmployeeAttendance> {
+  const response = await apiRequest<ApiEmployeeAttendance>(`/employees/${employeeId}/attendance/check-in`, {
+    method: 'POST',
+    headers: jsonHeaders(token),
+  });
+  return toEmployeeAttendance(response);
+}
+
+export async function checkOutCloudEmployee(token: string, employeeId: string): Promise<EmployeeAttendance> {
+  const response = await apiRequest<ApiEmployeeAttendance>(`/employees/${employeeId}/attendance/check-out`, {
+    method: 'POST',
+    headers: jsonHeaders(token),
+  });
+  return toEmployeeAttendance(response);
+}
+
+export async function fetchCloudEmployeeAttendanceHistory(token: string, employeeId: string): Promise<EmployeeAttendance[]> {
+  const response = await apiRequest<ApiEmployeeAttendance[]>(`/employees/${employeeId}/attendance/history`, { headers: jsonHeaders(token) });
+  return response.map(toEmployeeAttendance);
+}
+
+export async function fetchCloudTodayCheckedInEmployees(token: string, branchId?: string): Promise<TodayCheckedInEmployee[]> {
+  const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+  const response = await apiRequest<ApiTodayCheckedInEmployee[]>(`/employees/attendance/today-checked-in${query}`, { headers: jsonHeaders(token) });
+  return response.map(toTodayCheckedInEmployee);
+}
+
 export async function fetchCloudSuppliers(token: string, branchId?: string): Promise<Supplier[]> {
   const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
   const response = await apiRequest<ApiSupplier[]>(`/suppliers${query}`, { headers: jsonHeaders(token) });
@@ -1804,6 +1900,38 @@ export async function sendCloudOrderSms(
     }),
   });
   return toSmsManualSendResult(response);
+}
+
+export async function sendCloudPackedOrdersSms(
+  token: string,
+  payload: {
+    orderIds: string[];
+  }
+): Promise<SmsBulkPackedOrderSendResult> {
+  const response = await apiRequest<ApiSmsBulkPackedOrderSendResponse>('/sms/send-packed-order-messages', {
+    method: 'POST',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      order_ids: payload.orderIds,
+    }),
+  });
+  return toSmsBulkPackedOrderSendResult(response);
+}
+
+export async function sendCloudDueOrdersSms(
+  token: string,
+  payload: {
+    orderIds: string[];
+  }
+): Promise<SmsBulkPackedOrderSendResult> {
+  const response = await apiRequest<ApiSmsBulkPackedOrderSendResponse>('/sms/send-due-order-messages', {
+    method: 'POST',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      order_ids: payload.orderIds,
+    }),
+  });
+  return toSmsBulkPackedOrderSendResult(response);
 }
 
 export async function fetchCloudSmsLogs(

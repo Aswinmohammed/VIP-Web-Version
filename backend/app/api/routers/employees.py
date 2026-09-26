@@ -2,22 +2,25 @@ from __future__ import annotations
 
 import uuid
 from collections import OrderedDict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, apply_branch_scope, ensure_branch_in_tenant, get_current_actor, resolve_branch_scope
-from backend.app.models import Employee, EmployeeSalaryPayment, EmployeeWorkLog
+from backend.app.models import Employee, EmployeeAttendance, EmployeeSalaryPayment, EmployeeWorkLog
 from backend.app.schemas import (
+    EmployeeAttendanceRead,
     EmployeeCreate,
     EmployeeRead,
     EmployeeSalaryPaymentInput,
     EmployeeSalaryPaymentRead,
     EmployeeWorkLogInput,
     EmployeeWorkLogRead,
+    TodayCheckedInEmployeeRead,
 )
 
 
@@ -95,6 +98,65 @@ def _get_employee_or_404(db: Session, actor: AuthenticatedActor, employee_id: uu
     if not employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     return employee
+
+
+def _today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _attendance_worked_day_counts(
+    db: Session,
+    actor: AuthenticatedActor,
+    employee_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    if not employee_ids:
+        return {}
+
+    rows = db.execute(
+        select(EmployeeAttendance.employee_id, func.count(func.distinct(EmployeeAttendance.attendance_date)))
+        .where(
+            EmployeeAttendance.tenant_id == actor.tenant_id,
+            EmployeeAttendance.employee_id.in_(employee_ids),
+            EmployeeAttendance.check_in_at.is_not(None),
+        )
+        .group_by(EmployeeAttendance.employee_id)
+    ).all()
+    return {employee_id: int(count or 0) for employee_id, count in rows}
+
+
+def _serialize_attendance(
+    employee: Employee,
+    attendance: EmployeeAttendance | None,
+    worked_days: int,
+) -> EmployeeAttendanceRead:
+    return EmployeeAttendanceRead(
+        id=attendance.id if attendance else None,
+        employee_id=employee.id,
+        employee_name=employee.name,
+        branch_id=employee.branch_id,
+        attendance_date=attendance.attendance_date if attendance else _today(),
+        check_in_at=attendance.check_in_at if attendance else None,
+        check_out_at=attendance.check_out_at if attendance else None,
+        worked_days=worked_days,
+    )
+
+
+def _get_today_attendance(
+    db: Session,
+    actor: AuthenticatedActor,
+    employee_id: uuid.UUID,
+) -> EmployeeAttendance | None:
+    return db.scalar(
+        select(EmployeeAttendance).where(
+            EmployeeAttendance.tenant_id == actor.tenant_id,
+            EmployeeAttendance.employee_id == employee_id,
+            EmployeeAttendance.attendance_date == _today(),
+        )
+    )
 
 
 def _parse_uuid(value: str) -> uuid.UUID | None:
@@ -315,6 +377,156 @@ def update_employee(
     _replace_employee_children(db, actor, employee, payload)
     db.commit()
     return _get_employee_or_404(db, actor, employee.id)
+
+
+@router.get("/attendance/today", response_model=list[EmployeeAttendanceRead])
+def list_today_attendance(
+    branch_id: uuid.UUID | None = Query(default=None),
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[EmployeeAttendanceRead]:
+    employees = list(
+        db.scalars(
+            apply_branch_scope(
+                select(Employee).order_by(Employee.name.asc()),
+                Employee,
+                actor,
+                branch_id,
+            )
+        )
+    )
+    employee_ids = [employee.id for employee in employees]
+    today = _today()
+    attendance_rows = list(
+        db.scalars(
+            select(EmployeeAttendance).where(
+                EmployeeAttendance.tenant_id == actor.tenant_id,
+                EmployeeAttendance.employee_id.in_(employee_ids),
+                EmployeeAttendance.attendance_date == today,
+            )
+        )
+    ) if employee_ids else []
+    attendance_by_employee = {row.employee_id: row for row in attendance_rows}
+    worked_day_counts = _attendance_worked_day_counts(db, actor, employee_ids)
+
+    return [
+        _serialize_attendance(employee, attendance_by_employee.get(employee.id), worked_day_counts.get(employee.id, 0))
+        for employee in employees
+    ]
+
+
+@router.get("/attendance/today-checked-in", response_model=list[TodayCheckedInEmployeeRead])
+def list_today_checked_in_employees(
+    branch_id: uuid.UUID | None = Query(default=None),
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[TodayCheckedInEmployeeRead]:
+    employee_stmt = apply_branch_scope(select(Employee.id), Employee, actor, branch_id)
+    scoped_employee_ids = list(db.scalars(employee_stmt))
+    if not scoped_employee_ids:
+        return []
+
+    rows = db.execute(
+        select(EmployeeAttendance, Employee)
+        .join(Employee, Employee.id == EmployeeAttendance.employee_id)
+        .where(
+            EmployeeAttendance.tenant_id == actor.tenant_id,
+            EmployeeAttendance.employee_id.in_(scoped_employee_ids),
+            EmployeeAttendance.attendance_date == _today(),
+            EmployeeAttendance.check_in_at.is_not(None),
+        )
+        .order_by(EmployeeAttendance.check_in_at.asc())
+    ).all()
+
+    return [
+        TodayCheckedInEmployeeRead(
+            employee_id=employee.id,
+            employee_name=employee.name,
+            branch_id=employee.branch_id,
+            check_in_at=attendance.check_in_at,
+        )
+        for attendance, employee in rows
+        if attendance.check_in_at is not None
+    ]
+
+
+@router.post("/{employee_id}/attendance/check-in", response_model=EmployeeAttendanceRead)
+def check_in_employee(
+    employee_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> EmployeeAttendanceRead:
+    employee = _get_employee_or_404(db, actor, employee_id)
+    attendance = _get_today_attendance(db, actor, employee.id)
+    if attendance and attendance.check_in_at:
+        worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
+        return _serialize_attendance(employee, attendance, worked_days)
+
+    if not attendance:
+        attendance = EmployeeAttendance(
+            tenant_id=actor.tenant_id,
+            branch_id=employee.branch_id,
+            employee_id=employee.id,
+            attendance_date=_today(),
+            created_by=actor.id,
+        )
+        db.add(attendance)
+
+    attendance.check_in_at = _now()
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        attendance = _get_today_attendance(db, actor, employee.id)
+        if not attendance:
+            raise
+
+    db.refresh(attendance)
+    worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
+    return _serialize_attendance(employee, attendance, worked_days)
+
+
+@router.post("/{employee_id}/attendance/check-out", response_model=EmployeeAttendanceRead)
+def check_out_employee(
+    employee_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> EmployeeAttendanceRead:
+    employee = _get_employee_or_404(db, actor, employee_id)
+    attendance = _get_today_attendance(db, actor, employee.id)
+    if not attendance or not attendance.check_in_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee must check in before check out")
+
+    if not attendance.check_out_at:
+        attendance.check_out_at = _now()
+        attendance.checked_out_by = actor.id
+        db.commit()
+        db.refresh(attendance)
+
+    worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
+    return _serialize_attendance(employee, attendance, worked_days)
+
+
+@router.get("/{employee_id}/attendance/history", response_model=list[EmployeeAttendanceRead])
+def list_employee_attendance_history(
+    employee_id: uuid.UUID,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> list[EmployeeAttendanceRead]:
+    employee = _get_employee_or_404(db, actor, employee_id)
+    rows = list(
+        db.scalars(
+            select(EmployeeAttendance)
+            .where(
+                EmployeeAttendance.tenant_id == actor.tenant_id,
+                EmployeeAttendance.employee_id == employee.id,
+            )
+            .order_by(EmployeeAttendance.attendance_date.desc(), EmployeeAttendance.check_in_at.desc())
+        )
+    )
+    worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
+    return [_serialize_attendance(employee, row, worked_days) for row in rows]
 
 
 @router.post("/{employee_id}/work-logs", response_model=EmployeeWorkLogRead, status_code=status.HTTP_201_CREATED)

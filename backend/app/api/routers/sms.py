@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -13,6 +14,10 @@ from backend.app.dependencies import AuthenticatedActor, get_current_actor, requ
 from backend.app.models import Order, SmsCampaign, SmsCampaignStatus, SmsLog, SmsLogStatus, SmsSettings, SmsTemplate
 from backend.app.schemas import (
     SmsAnalyticsRead,
+    SmsBulkDueOrderSendRequest,
+    SmsBulkDueOrderSendResponse,
+    SmsBulkPackedOrderSendRequest,
+    SmsBulkPackedOrderSendResponse,
     SmsCampaignCreate,
     SmsCampaignLaunchRequest,
     SmsCampaignRead,
@@ -29,6 +34,9 @@ from backend.app.schemas import (
     SmsTemplateUpdate,
 )
 from backend.app.services.sms import (
+    build_due_order_manual_message,
+    build_packed_order_manual_message,
+    calculate_order_balance,
     create_campaign,
     dispatch_sms_logs_now,
     ensure_default_sms_templates,
@@ -216,6 +224,130 @@ def send_order_sms(
         segment_count=log.segment_count,
         estimated_cost=log.estimated_cost,
         message=log.error_message or "Order SMS request processed.",
+    )
+
+
+@router.post("/send-packed-order-messages", response_model=SmsBulkPackedOrderSendResponse)
+def send_packed_order_messages(
+    payload: SmsBulkPackedOrderSendRequest,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> SmsBulkPackedOrderSendResponse:
+    order_ids = list(dict.fromkeys(payload.order_ids))
+    stmt = (
+        select(Order)
+        .options(
+            selectinload(Order.customer),
+            selectinload(Order.items),
+            selectinload(Order.payments),
+            selectinload(Order.branch_rel),
+        )
+        .where(
+            Order.tenant_id == actor.tenant_id,
+            Order.id.in_(order_ids),
+        )
+    )
+    if actor.branch_id and actor.role.value == "branch_admin":
+        stmt = stmt.where(Order.branch_id == actor.branch_id)
+
+    orders_by_id = {order.id: order for order in db.scalars(stmt)}
+    sent = 0
+    failed = 0
+    skipped = 0
+
+    for order_id in order_ids:
+        order = orders_by_id.get(order_id)
+        raw_status = order.status.value if order is not None and hasattr(order.status, "value") else str(order.status) if order is not None else ""
+        if order is None or raw_status != "Packed":
+            skipped += 1
+            continue
+
+        try:
+            customer = getattr(order, "customer", None)
+            message = build_packed_order_manual_message(order, customer)
+            phone = customer.phone if customer is not None else ""
+            manual_payload = SimpleNamespace(phone=phone or "", message=message)
+            log = record_manual_order_sms(db, actor, order, manual_payload)
+            db.commit()
+            if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
+                sent += 1
+            elif log.status == SmsLogStatus.SKIPPED:
+                skipped += 1
+            else:
+                failed += 1
+        except Exception:
+            db.rollback()
+            failed += 1
+
+    failed_or_skipped = failed + skipped
+    return SmsBulkPackedOrderSendResponse(
+        total=len(order_ids),
+        sent=sent,
+        failed=failed,
+        skipped=skipped,
+        message=f"Bulk SMS completed. Sent: {sent}. Failed/Skipped: {failed_or_skipped}.",
+    )
+
+
+@router.post("/send-due-order-messages", response_model=SmsBulkDueOrderSendResponse)
+def send_due_order_messages(
+    payload: SmsBulkDueOrderSendRequest,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+    db: Session = Depends(get_db),
+) -> SmsBulkDueOrderSendResponse:
+    order_ids = list(dict.fromkeys(payload.order_ids))
+    stmt = (
+        select(Order)
+        .options(
+            selectinload(Order.customer),
+            selectinload(Order.items),
+            selectinload(Order.payments),
+            selectinload(Order.branch_rel),
+        )
+        .where(
+            Order.tenant_id == actor.tenant_id,
+            Order.id.in_(order_ids),
+        )
+    )
+    if actor.branch_id and actor.role.value == "branch_admin":
+        stmt = stmt.where(Order.branch_id == actor.branch_id)
+
+    orders_by_id = {order.id: order for order in db.scalars(stmt)}
+    sent = 0
+    failed = 0
+    skipped = 0
+
+    for order_id in order_ids:
+        order = orders_by_id.get(order_id)
+        raw_status = order.status.value if order is not None and hasattr(order.status, "value") else str(order.status) if order is not None else ""
+        if order is None or raw_status != "Due" or calculate_order_balance(order) <= Decimal("0.00"):
+            skipped += 1
+            continue
+
+        try:
+            customer = getattr(order, "customer", None)
+            message = build_due_order_manual_message(order, customer)
+            phone = customer.phone if customer is not None else ""
+            manual_payload = SimpleNamespace(phone=phone or "", message=message)
+            log = record_manual_order_sms(db, actor, order, manual_payload)
+            db.commit()
+            if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
+                sent += 1
+            elif log.status == SmsLogStatus.SKIPPED:
+                skipped += 1
+            else:
+                failed += 1
+        except Exception:
+            db.rollback()
+            failed += 1
+
+    failed_or_skipped = failed + skipped
+    return SmsBulkDueOrderSendResponse(
+        total=len(order_ids),
+        sent=sent,
+        failed=failed,
+        skipped=skipped,
+        message=f"Due order SMS completed. Sent: {sent}. Failed/Skipped: {failed_or_skipped}.",
     )
 
 

@@ -2,14 +2,15 @@
 import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
 import { AppContext } from '../context/AppContext';
 import { Order, Page, OrderItem, Measurement } from '../types';
-import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquare, Download, Loader2, StickyNote, Filter, Phone, Package, PhoneCall, Copy, Check, BellRing, MessageSquare, Send } from 'lucide-react';
+import { PlusCircle, Search, Eye, Edit, Trash2, Scissors, X, Printer, CheckSquare, Download, Loader2, StickyNote, Filter, Phone, Package, PhoneCall, Copy, Check, BellRing, MessageSquare, Send, Tag } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import DressQuantityTracker from './DressQuantityTracker';
-import { fetchCloudOrder, fetchProductionNotifications, fetchCloudOrderSearch, sendCloudOrderSms } from '../utils/cloudApi';
+import { fetchCloudOrder, fetchProductionNotifications, fetchCloudOrderSearch, sendCloudOrderSms, sendCloudPackedOrdersSms } from '../utils/cloudApi';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 import { calculateOrderTotals } from '../utils/orderUtils';
+import { printLabel } from '../utils/labelPrinter';
 
 const OWNER_CONTACT_PHONE = '077 777 0811';
 const OWNER_CONTACT_INDENT = '                             ';
@@ -196,9 +197,10 @@ const PackingSmsModal: React.FC<PackingSmsModalProps> = ({
   );
 };
 
-const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: () => void; onToggleCut: (itemId: string) => void; onMarkAllCut?: () => void; onUpdateStatus: (status: Order['status']) => void }> = ({
+const MeasurementModal: React.FC<{ order: Order; customerName: string; customerPhone: string; onClose: () => void; onToggleCut: (itemId: string) => void; onMarkAllCut?: () => void; onUpdateStatus: (status: Order['status']) => void }> = ({
   order,
   customerName,
+  customerPhone,
   onClose,
   onToggleCut,
   onMarkAllCut,
@@ -206,6 +208,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
 }: {
   order: Order;
   customerName: string;
+  customerPhone: string;
   onClose: () => void;
   onToggleCut: (itemId: string) => void;
   onMarkAllCut?: () => void;
@@ -220,6 +223,16 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
       window.print();
       setPrintingItemId(null);
     }, 100);
+  };
+
+  const handlePrintDressLabel = (item: OrderItem) => {
+    printLabel({
+      orderId: formatOrderId(order.id),
+      customerName,
+      customerPhone: formatPhoneNumber(customerPhone || order.customerPhone || ''),
+      dressType: item.dressType,
+      quantity: item.quantity || 1,
+    });
   };
 
   const handleDownloadPDF = async () => {
@@ -317,6 +330,12 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; onClose: 
                     className="flex items-center px-6 py-2.5 bg-[#111827] text-white rounded-xl font-bold uppercase text-[11px] hover:bg-black transition-all shadow-md active:scale-95"
                   >
                     <Printer size={16} className="mr-2" /> Print Item
+                  </button>
+                  <button
+                    onClick={() => handlePrintDressLabel(item)}
+                    className="flex items-center px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold uppercase text-[11px] hover:bg-indigo-700 transition-all shadow-md active:scale-95"
+                  >
+                    <Tag size={16} className="mr-2" /> Dress Label
                   </button>
                 </div>
               </div>              <div className="p-6 md:p-8">
@@ -475,9 +494,9 @@ interface CompletedModalProps {
 }
 const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDate, navigate }) => {
   const context = useContext(AppContext);
-  const [isPrintingCallList, setIsPrintingCallList] = useState(false);
   const [modalSearch, setModalSearch] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSendingAllPackingSms, setIsSendingAllPackingSms] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
   const [packingSmsModalOpen, setPackingSmsModalOpen] = useState(false);
   const [selectedSmsOrder, setSelectedSmsOrder] = useState<Order | null>(null);
@@ -547,6 +566,40 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
       return o.id.toLowerCase().includes(searchLower) || (cust?.name || '').toLowerCase().includes(searchLower) || (cust?.phone || '').toLowerCase().includes(searchLower);
     });
 
+    const handleSendAllPackingSms = async () => {
+      if (isSendingAllPackingSms) return;
+      if (!context?.isCloudMode || !context?.accessToken) {
+        alert('SMS sending is available only in cloud mode.');
+        return;
+      }
+      if (completedOrders.length === 0) {
+        alert('No packed-order customers are currently eligible for SMS.');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Send SMS to all packed-order customers?\n\nThis will send the packed-order notification to ${completedOrders.length} customers.`
+      );
+      if (!confirmed) return;
+
+      const orderIds = completedOrders.map((order) => order.serverId).filter((id): id is string => Boolean(id));
+      if (orderIds.length === 0) {
+        alert('No saved packed orders are available for bulk SMS.');
+        return;
+      }
+
+      setIsSendingAllPackingSms(true);
+      try {
+        const result = await sendCloudPackedOrdersSms(context.accessToken, { orderIds });
+        alert(`Bulk SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed/Skipped: ${result.failed + result.skipped}`);
+      } catch (error) {
+        console.error('Failed to send bulk packing SMS', error);
+        alert(error instanceof Error ? error.message : 'Bulk SMS failed.');
+      } finally {
+        setIsSendingAllPackingSms(false);
+      }
+    };
+
     const handleActionCalled = (orderId: string, clear: boolean = false) => {
       setOrders(prev => prev.map(o => {
         if (o.id !== orderId) return o;
@@ -610,14 +663,6 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
         alert('Failed to mark order as due.');
       }
     }
-  };
-
-  const handlePrint = () => {
-    setIsPrintingCallList(true);
-    setTimeout(() => {
-      window.print();
-      setIsPrintingCallList(false);
-    }, 300);
   };
 
   const handleDownloadPDF = async () => {
@@ -782,8 +827,8 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
             <button onClick={handleDownloadPDF} disabled={isGenerating} className="px-4 py-2 bg-[#10b981] text-white rounded-xl text-sm flex items-center hover:bg-emerald-600 disabled:opacity-50 font-bold">
               {isGenerating ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Download size={16} className="mr-2" />} PDF
             </button>
-            <button onClick={handlePrint} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm flex items-center hover:bg-black font-bold">
-              <Printer size={16} className="mr-2" /> Print List (3-Inch)
+            <button onClick={handleSendAllPackingSms} disabled={isSendingAllPackingSms || completedOrders.length === 0} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm flex items-center hover:bg-black disabled:opacity-50 font-bold">
+              {isSendingAllPackingSms ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Send size={16} className="mr-2" />} {isSendingAllPackingSms ? 'Sending...' : 'Send All'}
             </button>
             <button onClick={onClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors text-slate-500"><X size={24} /></button>
           </div>
@@ -1761,6 +1806,7 @@ const Orders: React.FC<OrdersProps> = ({ navigate }) => {
         <MeasurementModal
           order={viewingMeasurementsOrder}
           customerName={getCustomerName(viewingMeasurementsOrder)}
+          customerPhone={getCustomerPhone(viewingMeasurementsOrder)}
           onClose={() => setViewingMeasurementsOrder(null)}
           onToggleCut={handleToggleCut}
           onMarkAllCut={handleMarkAllCut}

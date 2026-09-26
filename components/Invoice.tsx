@@ -187,6 +187,7 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                 .text-xl { font-size: 20px; }
                 .text-2xl { font-size: 24px; }
                 .text-md { font-size: 16px; }
+                .company-name { font-size: 15px; white-space: nowrap; letter-spacing: -0.2px; }
                 .uppercase { text-transform: uppercase; }
                 .flex { display: flex; }
                 .flex-col { flex-direction: column; }
@@ -211,7 +212,7 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
 
                 {/* Receipt Header */}
                 <div className="text-center">
-                    <h1 className="text-lg bold uppercase">VIP Tailors & Fashion</h1>
+                    <h1 className="company-name bold">VIP Tailors & Fashion (PVT) LTD</h1>
                     <p className="text-xs mt-1">
                         {invoiceBranchAddress}<br />
                         <span className="bold block mt-1">Phone: {invoiceBranchPhone}</span>
@@ -341,17 +342,6 @@ const Invoice: React.FC<InvoiceProps> = ({ orderId, navigate }) => {
                 </div>
 
                 <div className="solid-line"></div>
-
-                <div className="flex flex-col items-center justify-center my-4">
-                    <img 
-                        src="/images/whatsapp_qr.jpeg" 
-                        alt="WhatsApp QR Code"  
-                        className="w-25 h-25 object-contain"
-                    />
-                    <p className="text-xs bold mt-1 text-center">Scan for WhatsApp</p>
-                </div>
-
-                <div className="thin-line"></div>
 
                 <div className="text-center text-xs">
                     <p className="bold mt-2">Software By ARM.ASWIN - 0778514532</p>

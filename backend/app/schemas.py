@@ -272,6 +272,7 @@ class InventoryItemRead(ORMModel):
     tenant_id: uuid.UUID
     legacy_id: str | None
     branch_id: uuid.UUID
+    branch_name: str | None = None
     item_code: str | None
     barcode_value: str | None
     name: str
@@ -566,6 +567,24 @@ class EmployeeRead(ORMModel):
         return [] if value is None else value
 
 
+class EmployeeAttendanceRead(BaseModel):
+    id: uuid.UUID | None = None
+    employee_id: uuid.UUID
+    employee_name: str
+    branch_id: uuid.UUID
+    attendance_date: date
+    check_in_at: datetime | None = None
+    check_out_at: datetime | None = None
+    worked_days: int = 0
+
+
+class TodayCheckedInEmployeeRead(BaseModel):
+    employee_id: uuid.UUID
+    employee_name: str
+    branch_id: uuid.UUID
+    check_in_at: datetime
+
+
 class SupplierPurchaseInput(BaseModel):
     id: str | None = None
     description: str = Field(min_length=1)
@@ -743,12 +762,36 @@ class SmsOrderManualSendRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
 
 
+class SmsBulkPackedOrderSendRequest(BaseModel):
+    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class SmsBulkDueOrderSendRequest(BaseModel):
+    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
 class SmsManualSendResponse(BaseModel):
     status: SmsLogStatus
     phone_normalized: str | None
     provider_message_id: str | None = None
     segment_count: int
     estimated_cost: Decimal
+    message: str
+
+
+class SmsBulkPackedOrderSendResponse(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    skipped: int
+    message: str
+
+
+class SmsBulkDueOrderSendResponse(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    skipped: int
     message: str
 
 

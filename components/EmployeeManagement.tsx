@@ -1,14 +1,20 @@
 
-import React, { useState, useContext, useMemo, useRef } from 'react';
+import React, { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import { AppContext } from '../context/AppContext';
-import { BranchPieceRate, Employee, WorkLog, SalaryPayment, DRESS_TYPES } from '../types';
-import { PlusCircle, Search, User, Phone, DollarSign, Calendar, Clock, Printer, Trash2, ArrowLeft, Save, X, Scissors, List, Filter } from 'lucide-react';
+import { BranchPieceRate, Employee, EmployeeAttendance, WorkLog, SalaryPayment, DRESS_TYPES } from '../types';
+import { PlusCircle, Search, User, Phone, DollarSign, Calendar, Clock, Printer, Trash2, ArrowLeft, Save, X, Scissors, List, Filter, CheckCircle2 } from 'lucide-react';
 import DressTypeDropdown from './DressTypeDropdown';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { printTailorLabel } from '../utils/labelPrinter';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
+import {
+    checkInCloudEmployee,
+    checkOutCloudEmployee,
+    fetchCloudEmployeeAttendanceHistory,
+    fetchCloudTodayAttendance,
+} from '../utils/cloudApi';
 
 const BRANCH_PIECE_LABEL = 'Branch Piece Count';
 const TEMP_ID_PREFIX = 'EMP';
@@ -17,8 +23,15 @@ const EmployeeManagement: React.FC = () => {
     const today = new Date().toISOString().split('T')[0];
     const context = useContext(AppContext);
     const [view, setView] = useState<'list' | 'detail'>('list');
+    const [listSection, setListSection] = useState<'employees' | 'attendance'>('employees');
     const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [attendanceRows, setAttendanceRows] = useState<EmployeeAttendance[]>([]);
+    const [attendanceHistory, setAttendanceHistory] = useState<Record<string, EmployeeAttendance[]>>({});
+    const [expandedAttendanceEmployeeId, setExpandedAttendanceEmployeeId] = useState<string | null>(null);
+    const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+    const [attendanceActionId, setAttendanceActionId] = useState<string | null>(null);
+    const [attendanceError, setAttendanceError] = useState<string | null>(null);
 
     // Add Employee Modal State
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -113,6 +126,7 @@ const EmployeeManagement: React.FC = () => {
         branches,
         activeBranchId,
         currentUser,
+        accessToken,
     } = context;
 
     // --- Helpers ---
@@ -174,6 +188,84 @@ const EmployeeManagement: React.FC = () => {
         const lower = searchTerm.toLowerCase();
         return employees.filter(e => e.name.toLowerCase().includes(lower) || e.phone.includes(lower));
     }, [employees, searchTerm]);
+
+    const getScopedBranchQuery = () => activeBranchId && activeBranchId !== 'all' ? activeBranchId : undefined;
+    const formatAttendanceTime = (value?: string | null) => {
+        if (!value) return '-';
+        return new Date(value).toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit' });
+    };
+    const formatAttendanceDate = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-LK', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+    const getAttendanceStatus = (row: EmployeeAttendance) => {
+        if (row.checkInAt && row.checkOutAt) return 'Completed';
+        if (row.checkInAt) return 'Working';
+        return 'Not Checked In';
+    };
+    const loadAttendanceRows = async () => {
+        if (!accessToken) return;
+        setIsAttendanceLoading(true);
+        setAttendanceError(null);
+        try {
+            const rows = await fetchCloudTodayAttendance(accessToken, getScopedBranchQuery());
+            setAttendanceRows(rows);
+        } catch (error) {
+            console.error('Failed to load attendance', error);
+            setAttendanceError(error instanceof Error ? error.message : 'Failed to load attendance');
+        } finally {
+            setIsAttendanceLoading(false);
+        }
+    };
+    const updateAttendanceRow = (nextRow: EmployeeAttendance) => {
+        setAttendanceRows((current) => current.map((row) => row.employeeId === nextRow.employeeId ? nextRow : row));
+    };
+    const handleAttendanceAction = async (employeeId: string, action: 'check-in' | 'check-out') => {
+        if (!accessToken) return;
+        setAttendanceActionId(`${employeeId}-${action}`);
+        setAttendanceError(null);
+        try {
+            const nextRow = action === 'check-in'
+                ? await checkInCloudEmployee(accessToken, employeeId)
+                : await checkOutCloudEmployee(accessToken, employeeId);
+            updateAttendanceRow(nextRow);
+            if (expandedAttendanceEmployeeId === employeeId) {
+                const history = await fetchCloudEmployeeAttendanceHistory(accessToken, employeeId);
+                setAttendanceHistory((current) => ({ ...current, [employeeId]: history }));
+            }
+        } catch (error) {
+            console.error('Attendance action failed', error);
+            setAttendanceError(error instanceof Error ? error.message : 'Attendance action failed');
+        } finally {
+            setAttendanceActionId(null);
+        }
+    };
+    const toggleAttendanceHistory = async (employeeId: string) => {
+        if (expandedAttendanceEmployeeId === employeeId) {
+            setExpandedAttendanceEmployeeId(null);
+            return;
+        }
+        setExpandedAttendanceEmployeeId(employeeId);
+        if (!accessToken || attendanceHistory[employeeId]) return;
+        setAttendanceActionId(`${employeeId}-history`);
+        setAttendanceError(null);
+        try {
+            const history = await fetchCloudEmployeeAttendanceHistory(accessToken, employeeId);
+            setAttendanceHistory((current) => ({ ...current, [employeeId]: history }));
+        } catch (error) {
+            console.error('Failed to load attendance history', error);
+            setAttendanceError(error instanceof Error ? error.message : 'Failed to load attendance history');
+        } finally {
+            setAttendanceActionId(null);
+        }
+    };
+
+    useEffect(() => {
+        if (view === 'list' && listSection === 'attendance') {
+            loadAttendanceRows();
+        }
+    }, [view, listSection, accessToken, activeBranchId]);
 
     const updateEmployeePieceRate = (employeeId: string, dressType: string, rate: number) => {
         setEmployees(employees.map((employee) => {
@@ -1483,16 +1575,162 @@ const EmployeeManagement: React.FC = () => {
                 </div>
             </div>
 
-            <AdminFilterBar
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                searchPlaceholder="Search employee name or phone..."
-                fromDate={dateFilter.from}
-                toDate={dateFilter.to}
-                onFromDateChange={(value) => setDateFilter((current) => ({ ...current, from: value }))}
-                onToDateChange={(value) => setDateFilter((current) => ({ ...current, to: value }))}
-            />
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                <button
+                    onClick={() => setListSection('employees')}
+                    className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${listSection === 'employees' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                    Employee List
+                </button>
+                <button
+                    onClick={() => setListSection('attendance')}
+                    className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${listSection === 'attendance' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                    Daily Attendance
+                </button>
+            </div>
 
+            {listSection === 'employees' && (
+                <AdminFilterBar
+                    searchTerm={searchTerm}
+                    onSearchChange={setSearchTerm}
+                    searchPlaceholder="Search employee name or phone..."
+                    fromDate={dateFilter.from}
+                    toDate={dateFilter.to}
+                    onFromDateChange={(value) => setDateFilter((current) => ({ ...current, from: value }))}
+                    onToDateChange={(value) => setDateFilter((current) => ({ ...current, to: value }))}
+                />
+            )}
+
+            {listSection === 'attendance' ? (
+                <div className="overflow-hidden rounded-xl bg-white shadow-sm border border-slate-200">
+                    <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="text-lg font-black text-slate-900">Daily Attendance</h2>
+                            <p className="text-sm font-semibold text-slate-500">{formatAttendanceDate(today)}</p>
+                        </div>
+                        <button
+                            onClick={loadAttendanceRows}
+                            disabled={isAttendanceLoading}
+                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                        >
+                            <Clock className="mr-2 h-4 w-4" />
+                            {isAttendanceLoading ? 'Loading...' : 'Refresh'}
+                        </button>
+                    </div>
+                    {attendanceError && (
+                        <div className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                            {attendanceError}
+                        </div>
+                    )}
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                <tr>
+                                    <th className="px-5 py-4">Employee</th>
+                                    <th className="px-5 py-4">Check-In</th>
+                                    <th className="px-5 py-4">Check-Out</th>
+                                    <th className="px-5 py-4">Status</th>
+                                    <th className="px-5 py-4 text-center">Worked Days</th>
+                                    {isAllBranchesScope && <th className="px-5 py-4">Branch</th>}
+                                    <th className="px-5 py-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {attendanceRows.map((row) => {
+                                    const statusLabel = getAttendanceStatus(row);
+                                    const isCheckingIn = attendanceActionId === `${row.employeeId}-check-in`;
+                                    const isCheckingOut = attendanceActionId === `${row.employeeId}-check-out`;
+                                    const isHistoryLoading = attendanceActionId === `${row.employeeId}-history`;
+                                    const isExpanded = expandedAttendanceEmployeeId === row.employeeId;
+                                    const history = attendanceHistory[row.employeeId] || [];
+
+                                    return (
+                                        <React.Fragment key={row.employeeId}>
+                                            <tr className="hover:bg-slate-50">
+                                                <td className="px-5 py-4 font-bold text-slate-900">{row.employeeName}</td>
+                                                <td className="px-5 py-4 font-semibold text-slate-700">{formatAttendanceTime(row.checkInAt)}</td>
+                                                <td className="px-5 py-4 font-semibold text-slate-700">{formatAttendanceTime(row.checkOutAt)}</td>
+                                                <td className="px-5 py-4">
+                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider ${statusLabel === 'Completed' ? 'bg-emerald-100 text-emerald-700' : statusLabel === 'Working' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                        {statusLabel}
+                                                    </span>
+                                                </td>
+                                                <td className="px-5 py-4 text-center font-black text-slate-900">{row.workedDays}</td>
+                                                {isAllBranchesScope && <td className="px-5 py-4 font-semibold text-slate-600">{getBranchName(row.branchId)}</td>}
+                                                <td className="px-5 py-4">
+                                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                                        <button
+                                                            onClick={() => handleAttendanceAction(row.employeeId, 'check-in')}
+                                                            disabled={Boolean(row.checkInAt) || isCheckingIn}
+                                                            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                                                            {isCheckingIn ? 'Saving...' : 'Check-In'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleAttendanceAction(row.employeeId, 'check-out')}
+                                                            disabled={!row.checkInAt || Boolean(row.checkOutAt) || isCheckingOut}
+                                                            className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            <Clock className="mr-1.5 h-4 w-4" />
+                                                            {isCheckingOut ? 'Saving...' : 'Check-Out'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => toggleAttendanceHistory(row.employeeId)}
+                                                            disabled={isHistoryLoading}
+                                                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                                                        >
+                                                            {isExpanded ? 'Hide History' : isHistoryLoading ? 'Loading...' : 'History'}
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {isExpanded && (
+                                                <tr>
+                                                    <td colSpan={isAllBranchesScope ? 7 : 6} className="bg-slate-50 px-5 py-4">
+                                                        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                                                            <table className="w-full text-sm">
+                                                                <thead className="bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                                                    <tr>
+                                                                        <th className="px-4 py-3 text-left">Date</th>
+                                                                        <th className="px-4 py-3 text-left">Check-In</th>
+                                                                        <th className="px-4 py-3 text-left">Check-Out</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-100">
+                                                                    {history.map((entry) => (
+                                                                        <tr key={entry.id || `${entry.employeeId}-${entry.date}`}>
+                                                                            <td className="px-4 py-3 font-semibold text-slate-800">{formatAttendanceDate(entry.date)}</td>
+                                                                            <td className="px-4 py-3 text-slate-600">{formatAttendanceTime(entry.checkInAt)}</td>
+                                                                            <td className="px-4 py-3 text-slate-600">{formatAttendanceTime(entry.checkOutAt)}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                    {history.length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={3} className="px-4 py-6 text-center italic text-slate-400">No attendance history found.</td>
+                                                                        </tr>
+                                                                    )}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                                {!isAttendanceLoading && attendanceRows.length === 0 && (
+                                    <tr>
+                                        <td colSpan={isAllBranchesScope ? 7 : 6} className="px-5 py-12 text-center italic text-slate-400">No employees found for today's attendance.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            ) : (
+                <>
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
@@ -1659,6 +1897,8 @@ const EmployeeManagement: React.FC = () => {
                     </tbody>
                 </table>
             </div>
+                </>
+            )}
 
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">

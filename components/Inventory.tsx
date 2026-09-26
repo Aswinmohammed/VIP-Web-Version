@@ -346,7 +346,16 @@ const Inventory: React.FC = () => {
     deleteInventoryItem,
     isAllBranchesScope,
     getBranchName,
+    currentUser,
   } = context;
+
+  const isSharedBranchItem = (item: InventoryItem) => (
+    currentUser?.role === 'branch_admin' &&
+    Boolean(currentUser.branchId) &&
+    item.branchId !== currentUser.branchId
+  );
+
+  const getInventoryBranchName = (item: InventoryItem) => item.branchName || getBranchName(item.branchId);
 
   const handleSave = async (item: InventoryItem) => {
     try {
@@ -551,12 +560,21 @@ const Inventory: React.FC = () => {
                       # {item.barcodeValue || item.itemCode}
                     </span>
                   )}
+                  {isSharedBranchItem(item) && (
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600">
+                      From {getInventoryBranchName(item)}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => handlePrintLabel(item)} className="rounded-lg bg-indigo-50 p-2 text-indigo-600" title="Print Label"><Tag size={18} /></button>
-                <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg bg-blue-50 p-2 text-blue-600" title="Edit Item"><Edit size={18} /></button>
-                <button onClick={() => void handleDelete(item.id)} className="rounded-lg bg-red-50 p-2 text-red-600" title="Delete Item"><Trash2 size={18} /></button>
+                {!isSharedBranchItem(item) && (
+                  <>
+                    <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg bg-blue-50 p-2 text-blue-600" title="Edit Item"><Edit size={18} /></button>
+                    <button onClick={() => void handleDelete(item.id)} className="rounded-lg bg-red-50 p-2 text-red-600" title="Delete Item"><Trash2 size={18} /></button>
+                  </>
+                )}
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -608,6 +626,11 @@ const Inventory: React.FC = () => {
                           # {item.barcodeValue || item.itemCode}
                         </span>
                       )}
+                      {isSharedBranchItem(item) && (
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600">
+                          From {getInventoryBranchName(item)}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 font-medium">{item.quantity}</td>
@@ -622,8 +645,12 @@ const Inventory: React.FC = () => {
                   <td className="px-6 py-4 print:hidden">
                     <div className="flex justify-center space-x-2">
                       <button onClick={() => handlePrintLabel(item)} className="rounded-lg p-2 text-indigo-600 transition-colors hover:bg-indigo-50" title="Print Label"><Tag size={18} /></button>
-                      <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50" title="Edit Item"><Edit size={18} /></button>
-                      <button onClick={() => void handleDelete(item.id)} className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50" title="Delete Item"><Trash2 size={18} /></button>
+                      {!isSharedBranchItem(item) && (
+                        <>
+                          <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50" title="Edit Item"><Edit size={18} /></button>
+                          <button onClick={() => void handleDelete(item.id)} className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50" title="Delete Item"><Trash2 size={18} /></button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

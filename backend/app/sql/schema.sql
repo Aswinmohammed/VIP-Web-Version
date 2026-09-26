@@ -308,6 +308,21 @@ CREATE TABLE IF NOT EXISTS employee_salary_payments (
     CONSTRAINT uq_employee_salary_payments_tenant_legacy UNIQUE (tenant_id, legacy_id)
 );
 
+CREATE TABLE IF NOT EXISTS employee_attendance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    attendance_date DATE NOT NULL,
+    check_in_at TIMESTAMPTZ NULL,
+    check_out_at TIMESTAMPTZ NULL,
+    created_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    checked_out_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_employee_attendance_tenant_employee_date UNIQUE (tenant_id, employee_id, attendance_date)
+);
+
 CREATE TABLE IF NOT EXISTS suppliers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -365,4 +380,6 @@ CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant_branch ON inventory_items 
 CREATE INDEX IF NOT EXISTS idx_expenses_tenant_branch ON expenses (tenant_id, branch_id);
 CREATE INDEX IF NOT EXISTS idx_material_sales_tenant_branch ON material_sales (tenant_id, branch_id);
 CREATE INDEX IF NOT EXISTS idx_employees_tenant_branch ON employees (tenant_id, branch_id);
+CREATE INDEX IF NOT EXISTS idx_employee_attendance_tenant_date ON employee_attendance (tenant_id, attendance_date);
+CREATE INDEX IF NOT EXISTS idx_employee_attendance_employee_id ON employee_attendance (employee_id);
 CREATE INDEX IF NOT EXISTS idx_suppliers_tenant_branch ON suppliers (tenant_id, branch_id);

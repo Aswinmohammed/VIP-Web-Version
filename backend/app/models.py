@@ -349,6 +349,7 @@ class Employee(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdM
 
     work_logs: Mapped[list["EmployeeWorkLog"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
     salary_payments: Mapped[list["EmployeeSalaryPayment"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
+    attendance_records: Mapped[list["EmployeeAttendance"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
 
 
 class EmployeeWorkLog(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
@@ -384,6 +385,23 @@ class EmployeeSalaryPayment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMix
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     employee: Mapped["Employee"] = relationship(back_populates="salary_payments")
+
+
+class EmployeeAttendance(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Base):
+    __tablename__ = "employee_attendance"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "employee_id", "attendance_date", name="uq_employee_attendance_tenant_employee_date"),
+        Index("idx_employee_attendance_tenant_date", "tenant_id", "attendance_date"),
+    )
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    check_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    check_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    checked_out_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    employee: Mapped["Employee"] = relationship(back_populates="attendance_records")
 
 
 class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):

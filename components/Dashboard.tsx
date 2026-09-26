@@ -1,12 +1,13 @@
-import React, { useContext, useState, useMemo } from 'react';
-import { Page, Order } from '../types';
+import React, { useContext, useState, useMemo, useEffect } from 'react';
+import { Page, Order, TodayCheckedInEmployee } from '../types';
 import { AppContext } from '../context/AppContext';
-import { Users, ShoppingCart, Package, BarChart2, ArrowUpRight, Coins, Receipt, X, Download, Loader2 } from 'lucide-react';
+import { Users, ShoppingCart, Package, BarChart2, ArrowUpRight, Coins, Receipt, X, Download, Loader2, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { jsPDF } from 'jspdf';
 import AdminFilterBar from './AdminFilterBar';
 import { downloadDataUri } from '../utils/downloads';
 import { calculateOrderTotals } from '../utils/orderUtils';
+import { fetchCloudTodayCheckedInEmployees } from '../utils/cloudApi';
 
 interface DashboardProps {
   navigate: (page: Page, orderId?: string) => void;
@@ -57,9 +58,12 @@ const StatCard: React.FC<{
 
 const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   const context = useContext(AppContext);
-  const [activeModal, setActiveModal] = useState<'today' | null>(null);
+  const [activeModal, setActiveModal] = useState<'today' | 'checkins' | null>(null);
   const [modalView, setModalView] = useState<'incomes' | 'expenses'>('incomes');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [todayCheckIns, setTodayCheckIns] = useState<TodayCheckedInEmployee[]>([]);
+  const [isCheckInsLoading, setIsCheckInsLoading] = useState(false);
+  const [checkInsError, setCheckInsError] = useState<string | null>(null);
 
   const formatOrderId = (id: string) => {
     if (id.startsWith('ORD') && !id.includes('-')) {
@@ -69,11 +73,33 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
   };
 
   if (!context) return <div>Loading...</div>;
-  const { customers, orders, inventory, materialSales, expenses, employees, settings, branches, currentBranch, isAllBranchesScope, getBranchName, isPageLoading } = context;
+  const { customers, orders, inventory, materialSales, expenses, employees, settings, branches, currentBranch, isAllBranchesScope, getBranchName, isPageLoading, accessToken, activeBranchId } = context;
   const branchScopeLabel = isAllBranchesScope ? 'All Branches' : currentBranch?.name || 'Branch Overview';
   const isInitialDashboardLoading = isPageLoading && customers.length === 0 && orders.length === 0 && inventory.length === 0;
 
   const todayStr = new Date().toISOString().split('T')[0];
+  const formatCheckInTime = (value: string) => new Date(value).toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit' });
+  const loadTodayCheckIns = async () => {
+    if (!accessToken) return;
+    setIsCheckInsLoading(true);
+    setCheckInsError(null);
+    try {
+      const branchId = activeBranchId && activeBranchId !== 'all' ? activeBranchId : undefined;
+      const rows = await fetchCloudTodayCheckedInEmployees(accessToken, branchId);
+      setTodayCheckIns(rows);
+    } catch (error) {
+      console.error('Failed to load today check-ins', error);
+      setCheckInsError(error instanceof Error ? error.message : 'Failed to load today check-ins');
+    } finally {
+      setIsCheckInsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeModal === 'checkins') {
+      loadTodayCheckIns();
+    }
+  }, [activeModal, accessToken, activeBranchId]);
   const normalizePaymentMethod = (method?: string) => {
     if (method === 'Bank Transfer') return 'Bank';
     return method || 'Cash';
@@ -555,9 +581,18 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
           </div>
         </div>
         <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-100">
-          <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center">
-            Recent Orders
-          </h2>
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center">
+              Recent Orders
+            </h2>
+            <button
+              onClick={() => setActiveModal('checkins')}
+              className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+            >
+              <Clock className="mr-1.5 h-4 w-4" />
+              Today Check-In
+            </button>
+          </div>
           <div className="space-y-4">
             {recentOrders.map(order => {
               const totals = calculateOrderTotals(order);
@@ -751,6 +786,53 @@ const Dashboard: React.FC<DashboardProps> = ({ navigate }) => {
             </div>
           )}
 
+        </DetailModal>
+      )}
+
+      {activeModal === 'checkins' && (
+        <DetailModal title="Today Check-In" onClose={() => setActiveModal(null)}>
+          {checkInsError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {checkInsError}
+            </div>
+          )}
+          {isCheckInsLoading ? (
+            <div className="flex items-center justify-center gap-3 py-12 text-sm font-bold text-slate-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Loading check-ins...
+            </div>
+          ) : todayCheckIns.length > 0 ? (
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              <table className="w-full text-left">
+                <thead className="border-b bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-6 py-4">Employee Name</th>
+                    <th className="px-6 py-4">Check-In Time</th>
+                    {isAllBranchesScope && <th className="px-6 py-4">Branch</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {todayCheckIns.map((employee) => (
+                    <tr key={employee.employeeId} className="hover:bg-slate-50">
+                      <td className="px-6 py-4 font-bold text-slate-800">{employee.employeeName}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-600">{formatCheckInTime(employee.checkInAt)}</td>
+                      {isAllBranchesScope && (
+                        <td className="px-6 py-4">
+                          <span className="inline-block rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-slate-600">
+                            {getBranchName(employee.branchId)}
+                          </span>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm font-semibold text-slate-500">
+              No employees checked in today.
+            </div>
+          )}
         </DetailModal>
       )}
     </div>

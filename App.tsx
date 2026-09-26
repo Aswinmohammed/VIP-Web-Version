@@ -1758,6 +1758,7 @@ const App: React.FC = () => {
       setAccessToken(session.accessToken);
       setCurrentUser(session.currentUser);
       setActiveBranchId(nextBranchId);
+      setPage('Orders');
     } finally {
       setIsAuthenticating(false);
     }

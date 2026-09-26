@@ -224,6 +224,7 @@ export interface InventoryItem {
   branchId: string;
   itemCode: string;
   barcodeValue?: string;
+  branchName?: string;
   name: string;
   category: string;
   quantity: number;
@@ -320,6 +321,24 @@ export interface Employee {
   workLogs: WorkLog[];
   salaryPayments: SalaryPayment[];
   joinedDate: string;
+}
+
+export interface EmployeeAttendance {
+  id?: string;
+  employeeId: string;
+  employeeName: string;
+  branchId: string;
+  date: string;
+  checkInAt?: string | null;
+  checkOutAt?: string | null;
+  workedDays: number;
+}
+
+export interface TodayCheckedInEmployee {
+  employeeId: string;
+  employeeName: string;
+  branchId: string;
+  checkInAt: string;
 }
 
 export interface SupplierPurchase {
@@ -500,6 +519,14 @@ export interface SmsManualSendResult {
   providerMessageId?: string | null;
   segmentCount: number;
   estimatedCost: number;
+  message: string;
+}
+
+export interface SmsBulkPackedOrderSendResult {
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
   message: string;
 }
 

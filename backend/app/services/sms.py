@@ -720,6 +720,43 @@ def _build_order_variables(
     }
 
 
+def build_packed_order_manual_message(order: Order, customer: Customer | None) -> str:
+    customer_name = customer.name if customer and customer.name else "Customer"
+    balance = calculate_order_balance(order)
+    branch_phone = format_contact_phone(order.branch_rel.phone if getattr(order, "branch_rel", None) is not None else None)
+    payment_line = f"Balance amount: Rs.{balance:.2f}." if balance > Decimal("0.00") else "Payment is fully settled."
+    return normalize_sms_message(
+        "\n".join(
+            [
+                f"Dear {customer_name}, your order {order.order_number} is packed and ready for collection.",
+                payment_line,
+                f"For More Details: {branch_phone}",
+                f"{OWNER_CONTACT_INDENT}{OWNER_CONTACT_PHONE}",
+                SMS_FOOTER_LINE,
+            ]
+        )
+    )
+
+
+def build_due_order_manual_message(order: Order, customer: Customer | None) -> str:
+    customer_name = customer.name if customer and customer.name else "Customer"
+    balance = calculate_order_balance(order)
+    branch_phone = format_contact_phone(order.branch_rel.phone if getattr(order, "branch_rel", None) is not None else None)
+    due_date = order.due_date or order.order_date
+    return normalize_sms_message(
+        "\n".join(
+            [
+                f"Dear {customer_name}, your order {order.order_number} is pending payment.",
+                f"Due amount: Rs.{balance:.2f}.",
+                f"Due date: {due_date.isoformat() if isinstance(due_date, date) else due_date}.",
+                f"For More Details: {branch_phone}",
+                f"{OWNER_CONTACT_INDENT}{OWNER_CONTACT_PHONE}",
+                SMS_FOOTER_LINE,
+            ]
+        )
+    )
+
+
 def queue_sms_message(
     db: Session,
     *,
