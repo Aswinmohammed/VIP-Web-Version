@@ -37,7 +37,7 @@ import {
 } from '../types';
 
 const API_BASE = '/api/v1';
-const API_TIMEOUT_MS = 30000;
+const API_TIMEOUT_MS = 60000;
 
 type LoginPayload = {
   tenantCode: string;

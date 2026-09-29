@@ -5,11 +5,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app.database import get_db
+from backend.app.database import SessionLocal, get_db
 from backend.app.dependencies import AuthenticatedActor, get_current_actor, require_master_admin, resolve_branch_scope
 from backend.app.models import Branch, Order, SmsCampaign, SmsCampaignStatus, SmsLog, SmsLogStatus, SmsSettings, SmsTemplate
 from backend.app.schemas import (
@@ -75,6 +75,17 @@ def _log_scope_stmt(actor: AuthenticatedActor):
         stmt = stmt.where(SmsLog.branch_id == actor.branch_id)
     return stmt
 
+
+
+def _dispatch_logs_in_background(log_ids: list[uuid.UUID]) -> None:
+    if not log_ids:
+        return
+    with SessionLocal() as session:
+        try:
+            dispatch_sms_logs_now(session, log_ids)
+            session.commit()
+        except Exception:
+            session.rollback()
 
 
 def _dispatch_campaign_logs(db: Session, campaign_id: uuid.UUID) -> None:
@@ -254,6 +265,7 @@ def send_packed_order_messages(
     payload: SmsBulkPackedOrderSendRequest,
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ) -> SmsBulkPackedOrderSendResponse:
     order_ids_raw = list(dict.fromkeys(payload.order_ids))
     uuid_list: list[uuid.UUID] = []
@@ -312,6 +324,7 @@ def send_packed_order_messages(
     sent = 0
     failed = 0
     skipped = 0
+    queued_log_ids: list[uuid.UUID] = []
 
     for raw_id in order_ids_raw:
         order = orders_lookup.get(str(raw_id).strip())
@@ -340,17 +353,27 @@ def send_packed_order_messages(
                 manual_payload,
                 sms_type="packed_order_calling_list",
                 trigger_event="packed_order_send",
+                dispatch_now=False,
             )
-            db.commit()
-            if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
+            if log.status == SmsLogStatus.QUEUED:
+                queued_log_ids.append(log.id)
+                sent += 1
+            elif log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
                 sent += 1
             elif log.status == SmsLogStatus.SKIPPED:
                 skipped += 1
             else:
                 failed += 1
         except Exception:
-            db.rollback()
             failed += 1
+
+    db.commit()
+
+    if queued_log_ids:
+        if background_tasks is not None:
+            background_tasks.add_task(_dispatch_logs_in_background, queued_log_ids)
+        else:
+            dispatch_sms_logs_now(db, queued_log_ids)
 
     failed_or_skipped = failed + skipped
     return SmsBulkPackedOrderSendResponse(
@@ -367,6 +390,7 @@ def send_due_order_messages(
     payload: SmsBulkDueOrderSendRequest,
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ) -> SmsBulkDueOrderSendResponse:
     order_ids_raw = list(dict.fromkeys(payload.order_ids))
     uuid_list: list[uuid.UUID] = []
@@ -425,6 +449,7 @@ def send_due_order_messages(
     sent = 0
     failed = 0
     skipped = 0
+    queued_log_ids: list[uuid.UUID] = []
 
     for raw_id in order_ids_raw:
         order = orders_lookup.get(str(raw_id).strip())
@@ -453,17 +478,27 @@ def send_due_order_messages(
                 manual_payload,
                 sms_type="due_order_reminder",
                 trigger_event="due_order_send",
+                dispatch_now=False,
             )
-            db.commit()
-            if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
+            if log.status == SmsLogStatus.QUEUED:
+                queued_log_ids.append(log.id)
+                sent += 1
+            elif log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
                 sent += 1
             elif log.status == SmsLogStatus.SKIPPED:
                 skipped += 1
             else:
                 failed += 1
         except Exception:
-            db.rollback()
             failed += 1
+
+    db.commit()
+
+    if queued_log_ids:
+        if background_tasks is not None:
+            background_tasks.add_task(_dispatch_logs_in_background, queued_log_ids)
+        else:
+            dispatch_sms_logs_now(db, queued_log_ids)
 
     failed_or_skipped = failed + skipped
     return SmsBulkDueOrderSendResponse(

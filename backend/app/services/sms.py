@@ -1236,6 +1236,7 @@ def record_manual_order_sms(
     payload: Any,
     sms_type: str = "manual_order_message",
     trigger_event: str | None = "manual_order_send",
+    dispatch_now: bool = True,
 ) -> SmsLog:
     customer = getattr(order, "customer", None)
     phone = getattr(payload, "phone", None) or (customer.phone if customer else None)
@@ -1252,7 +1253,7 @@ def record_manual_order_sms(
         dedupe_key=f"{sms_type}:{order.id}:{uuid.uuid4().hex}",
         order=order,
     )
-    if log.status == SmsLogStatus.QUEUED:
+    if dispatch_now and log.status == SmsLogStatus.QUEUED:
         dispatch_sms_logs_now(db, [log.id])
     db.flush()
     return log
