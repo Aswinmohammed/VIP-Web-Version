@@ -530,10 +530,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const handleMeasurementKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, itemIndex: number, measIndex: number) => {
     if (!measurementInput.isOpen) {
-      const currentValue = order.items[itemIndex].measurements[measIndex].value;
-      if (currentValue && e.key !== 'Tab' && e.key !== 'Enter') {
+      const currentValue = order.items[itemIndex].measurements[measIndex]?.value;
+      if (currentValue && e.key !== 'Tab' && e.key !== 'Enter' && e.key !== 'Escape') {
         const suggestions = generateMeasurementSuggestions(currentValue);
-        if (suggestions.length > 0 && e.key !== 'Escape') {
+        if (suggestions.length > 0) {
           setMeasurementInput({ itemIndex, measIndex, isOpen: true, suggestions, selectedIndex: 0 });
         }
       }
@@ -550,21 +550,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
         setMeasurementInput(prev => ({ ...prev, selectedIndex: prev.selectedIndex === 0 ? prev.suggestions.length - 1 : prev.selectedIndex - 1 }));
         break;
       case 'Tab':
-      case 'Enter':
-        e.preventDefault();
+      case 'Enter': {
         const suggestion = measurementInput.suggestions[measurementInput.selectedIndex];
         if (suggestion) {
+          e.preventDefault();
           markDirty();
           const newItems = [...order.items];
           newItems[itemIndex].measurements[measIndex].value = suggestion.value;
           setOrder(prev => ({ ...prev, items: newItems }));
           setMeasurementInput(prev => ({ ...prev, isOpen: false }));
-          if (e.key === 'Tab') {
-            const nextInput = document.querySelector(`[data-measurement-next="${itemIndex}-${measIndex}"]`) as HTMLElement;
-            if (nextInput) setTimeout(() => nextInput.focus(), 0);
-          }
+          const nextInput = document.querySelector(`[data-measurement-input="${itemIndex}-${measIndex + 1}"]`) as HTMLInputElement;
+          if (nextInput) setTimeout(() => nextInput.focus(), 10);
         }
         break;
+      }
       case 'Escape':
         e.preventDefault();
         setMeasurementInput(prev => ({ ...prev, isOpen: false }));
@@ -578,6 +577,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     newItems[itemIndex].measurements[measIndex].value = suggestion.value;
     setOrder(prev => ({ ...prev, items: newItems }));
     setMeasurementInput(prev => ({ ...prev, isOpen: false }));
+    const nextInput = document.querySelector(`[data-measurement-input="${itemIndex}-${measIndex + 1}"]`) as HTMLInputElement;
+    if (nextInput) setTimeout(() => nextInput.focus(), 10);
   };
 
   const addItem = () => {
@@ -608,19 +609,48 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   };
 
   const generateMeasurementSuggestions = (baseValue: string): MeasurementSuggestion[] => {
-    const num = parseFlexibleNumber(baseValue);
+    if (!baseValue || !baseValue.trim()) return [];
+    const trimmed = baseValue.trim();
+
+    // Check if the input is a whole number (e.g. "45")
+    if (/^\d+$/.test(trimmed)) {
+      const intVal = parseInt(trimmed, 10);
+      if (intVal <= 0) return [];
+      return [
+        { id: `exact-${intVal}`, value: `${intVal}` },
+        { id: `quarter-${intVal}`, value: `${intVal}¼` },
+        { id: `half-${intVal}`, value: `${intVal}½` },
+        { id: `threequarter-${intVal}`, value: `${intVal}¾` },
+      ];
+    }
+
+    // If input already has a decimal or fraction
+    const num = parseFlexibleNumber(trimmed);
     if (isNaN(num) || num <= 0) return [];
-    // Always show the actual input value as the first suggestion
+
+    const intPart = Math.floor(num);
+    const fracPart = +(num - intPart).toFixed(2);
+
     const suggestions: MeasurementSuggestion[] = [
-      { id: `actual-${num}`, value: baseValue }
+      { id: `actual-${trimmed}`, value: trimmed }
     ];
-    // Add fractional suggestions with unicode characters
-    suggestions.push(
-      { id: `quarter-${num}`, value: `${num}¼` },
-      { id: `half-${num}`, value: `${num}½` },
-      { id: `threequarter-${num}`, value: `${num}¾` }
-    );
-    return suggestions;
+
+    if (fracPart === 0.25 || fracPart === 0.2) {
+      suggestions.push({ id: `quarter-${intPart}`, value: `${intPart}¼` });
+    } else if (fracPart === 0.5) {
+      suggestions.push({ id: `half-${intPart}`, value: `${intPart}½` });
+    } else if (fracPart === 0.75 || fracPart === 0.7) {
+      suggestions.push({ id: `threequarter-${intPart}`, value: `${intPart}¾` });
+    } else if (fracPart === 0) {
+      suggestions.push(
+        { id: `quarter-${intPart}`, value: `${intPart}¼` },
+        { id: `half-${intPart}`, value: `${intPart}½` },
+        { id: `threequarter-${intPart}`, value: `${intPart}¾` }
+      );
+    }
+
+    // Deduplicate suggestions by value
+    return suggestions.filter((s, idx, arr) => arr.findIndex(x => x.value === s.value) === idx);
   };
 
   const handleAddPayment = () => {
@@ -1130,37 +1160,100 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                 </div>
                 <div className="p-4 bg-white grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div>
-                    <div className="flex items-center mb-2"><Ruler className="w-4 h-4 text-gray-400 mr-2" /><h4 className="text-sm font-medium text-gray-600">Measurements</h4></div>
+                    <div className="flex items-center mb-2">
+                      <Ruler className="w-4 h-4 text-gray-400 mr-2" />
+                      <h4 className="text-sm font-medium text-gray-600">Measurements</h4>
+                    </div>
                     <div className="flex flex-wrap items-center gap-3">
                       {item.measurements.map((meas, measIndex) => (
                         <div key={meas.id} className="relative">
-                          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-md px-2 py-1">
+                          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-md px-2 py-1 shadow-sm focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-300">
                             {/* <span className="text-[10px] font-bold text-gray-400 mr-2 uppercase">{meas.name}:</span> */}
                             <input
                               type="text"
                               name="value"
                               placeholder="Value"
                               value={meas.value}
+                              data-measurement-input={`${itemIndex}-${measIndex}`}
                               onChange={e => handleMeasurementChange(itemIndex, measIndex, e)}
                               onKeyDown={e => handleMeasurementKeyDown(e, itemIndex, measIndex)}
-                              className="w-16 bg-white border border-gray-300 rounded px-1 py-0.5 text-sm text-black font-semibold focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                              onFocus={() => {
+                                if (meas.value && meas.value.trim() !== '') {
+                                  const suggestions = generateMeasurementSuggestions(meas.value);
+                                  if (suggestions.length > 0) {
+                                    setMeasurementInput({ itemIndex, measIndex, isOpen: true, suggestions, selectedIndex: 0 });
+                                  }
+                                }
+                              }}
+                              className="w-16 bg-white border border-gray-300 rounded px-1.5 py-0.5 text-sm text-gray-900 font-semibold focus:outline-none focus:border-indigo-500"
                             />
-                            <button type="button" onClick={() => removeMeasurement(itemIndex, measIndex)} className="ml-2 text-gray-400 hover:text-red-500" data-measurement-next={`${itemIndex}-${measIndex}`}>
+                            <button
+                              type="button"
+                              onClick={() => removeMeasurement(itemIndex, measIndex)}
+                              className="ml-1 text-gray-400 hover:text-red-500 transition-colors p-0.5"
+                              title="Remove measurement"
+                            >
                               <XCircle size={14} />
                             </button>
                           </div>
                           {measurementInput.isOpen && measurementInput.itemIndex === itemIndex && measurementInput.measIndex === measIndex && (
-                            <div ref={measurementSuggestionsRef} className="absolute z-50 top-full mt-1 w-max bg-white border border-primary-300 rounded-md shadow-2xl">
-                              {measurementInput.suggestions.map((suggestion, idx) => (
-                                <button key={suggestion.id} type="button" onClick={() => selectMeasurementSuggestion(itemIndex, measIndex, suggestion)} className={`block w-full text-left px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap ${idx === measurementInput.selectedIndex ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
-                                  {suggestion.value}
-                                </button>
-                              ))}
+                            <div
+                              ref={measurementSuggestionsRef}
+                              className="absolute left-0 top-full mt-1.5 z-50 min-w-[140px] bg-white rounded-lg shadow-2xl border border-indigo-200 py-1 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+                            >
+                              <div className="px-2.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                                <span>Fraction</span>
+                                <span className="text-[9px] text-gray-400 font-normal">↵ Select</span>
+                              </div>
+                              <div className="flex flex-col divide-y divide-gray-50">
+                                {measurementInput.suggestions.map((suggestion, idx) => {
+                                  const isSelected = idx === measurementInput.selectedIndex;
+                                  const isQuarter = suggestion.value.includes('¼');
+                                  const isHalf = suggestion.value.includes('½');
+                                  const isThreeQuarter = suggestion.value.includes('¾');
+                                  const badgeText = isQuarter ? '¼ (.25)' : isHalf ? '½ (.50)' : isThreeQuarter ? '¾ (.75)' : 'Exact';
+
+                                  return (
+                                    <button
+                                      key={suggestion.id}
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        selectMeasurementSuggestion(itemIndex, measIndex, suggestion);
+                                      }}
+                                      className={`w-full text-left px-2.5 py-1.5 text-xs font-semibold transition-colors flex items-center justify-between gap-2 ${
+                                        isSelected
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-700'
+                                      }`}
+                                    >
+                                      <span className="font-mono text-sm font-bold">{suggestion.value}</span>
+                                      <span
+                                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                          isSelected
+                                            ? 'bg-indigo-700 text-indigo-100'
+                                            : isQuarter || isHalf || isThreeQuarter
+                                            ? 'bg-indigo-50 text-indigo-600 font-bold'
+                                            : 'bg-gray-100 text-gray-500'
+                                        }`}
+                                      >
+                                        {badgeText}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>
                       ))}
-                      <button type="button" onClick={() => addMeasurement(itemIndex)} className="flex items-center justify-center px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 border border-dashed border-primary-300 rounded-md hover:bg-primary-100"><PlusCircle size={14} className="mr-1" /> Add</button>
+                      <button
+                        type="button"
+                        onClick={() => addMeasurement(itemIndex)}
+                        className="flex items-center justify-center px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 border border-dashed border-primary-300 rounded-md hover:bg-primary-100"
+                      >
+                        <PlusCircle size={14} className="mr-1" /> Add
+                      </button>
                     </div>
                   </div>
                   <div>

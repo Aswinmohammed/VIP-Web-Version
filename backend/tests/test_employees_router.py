@@ -8,7 +8,12 @@ import uuid
 from backend.app.api.routers import employees
 from backend.app.dependencies import AuthenticatedActor
 from backend.app.models import UserRole
-from backend.app.schemas import EmployeeSalaryPaymentInput, EmployeeWorkLogInput
+from backend.app.schemas import (
+    EmployeeAttendanceCheckInInput,
+    EmployeeAttendanceCheckOutInput,
+    EmployeeSalaryPaymentInput,
+    EmployeeWorkLogInput,
+)
 
 
 def make_actor() -> AuthenticatedActor:
@@ -145,3 +150,68 @@ def test_create_employee_salary_payment_reuses_existing_legacy_id(monkeypatch):
     assert existing_payment.legacy_id == "PAY1"
     assert existing_payment.amount == Decimal("125")
     assert existing_payment.note == "advance"
+
+
+def test_check_in_employee_with_custom_date_and_time(monkeypatch):
+    actor = make_actor()
+    employee = SimpleNamespace(id=uuid.uuid4(), name="John", branch_id=uuid.uuid4())
+    db = DummySession(None)
+
+    target_date = date(2026, 4, 15)
+    custom_time = datetime(2026, 4, 15, 8, 30, 0, tzinfo=timezone.utc)
+    payload = EmployeeAttendanceCheckInInput(
+        attendance_date=target_date,
+        check_in_at=custom_time,
+    )
+
+    monkeypatch.setattr(employees, "_get_employee_or_404", lambda *_args, **_kwargs: employee)
+    monkeypatch.setattr(employees, "_get_date_attendance", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(employees, "_attendance_worked_day_counts", lambda *_args, **_kwargs: {employee.id: 1})
+
+    result = employees.check_in_employee(employee.id, payload, actor, db)
+
+    assert len(db.added) == 1
+    added_attendance = db.added[0]
+    assert added_attendance.attendance_date == target_date
+    assert added_attendance.check_in_at == custom_time
+    assert added_attendance.tenant_id == actor.tenant_id
+    assert added_attendance.branch_id == employee.branch_id
+    assert added_attendance.employee_id == employee.id
+    assert db.committed is True
+    assert result.attendance_date == target_date
+    assert result.check_in_at == custom_time
+
+
+def test_check_out_employee_with_custom_date_and_time(monkeypatch):
+    actor = make_actor()
+    employee = SimpleNamespace(id=uuid.uuid4(), name="John", branch_id=uuid.uuid4())
+    target_date = date(2026, 4, 15)
+    check_in_time = datetime(2026, 4, 15, 8, 30, 0, tzinfo=timezone.utc)
+    existing_attendance = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=actor.tenant_id,
+        branch_id=employee.branch_id,
+        employee_id=employee.id,
+        attendance_date=target_date,
+        check_in_at=check_in_time,
+        check_out_at=None,
+        checked_out_by=None,
+    )
+    db = DummySession(existing_attendance)
+
+    custom_out_time = datetime(2026, 4, 15, 17, 45, 0, tzinfo=timezone.utc)
+    payload = EmployeeAttendanceCheckOutInput(
+        attendance_date=target_date,
+        check_out_at=custom_out_time,
+    )
+
+    monkeypatch.setattr(employees, "_get_employee_or_404", lambda *_args, **_kwargs: employee)
+    monkeypatch.setattr(employees, "_get_date_attendance", lambda *_args, **_kwargs: existing_attendance)
+    monkeypatch.setattr(employees, "_attendance_worked_day_counts", lambda *_args, **_kwargs: {employee.id: 1})
+
+    result = employees.check_out_employee(employee.id, payload, actor, db)
+
+    assert existing_attendance.check_out_at == custom_out_time
+    assert existing_attendance.checked_out_by == actor.id
+    assert db.committed is True
+    assert result.check_out_at == custom_out_time

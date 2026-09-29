@@ -565,16 +565,18 @@ const DueOrders: React.FC<DueOrdersProps> = ({ navigate }) => {
     );
     if (!confirmed) return;
 
-    const orderIds = dueOrders.map((order) => order.serverId).filter((id): id is string => Boolean(id));
+    const orderIds = dueOrders
+      .map((order) => order.serverId || order.id)
+      .filter((id): id is string => Boolean(id && String(id).trim()));
     if (orderIds.length === 0) {
-      alert('No saved due orders are available for bulk SMS.');
+      alert('No due orders available for bulk SMS.');
       return;
     }
 
     setIsSendingAllDueSms(true);
     try {
       const result = await sendCloudDueOrdersSms(accessToken, { orderIds });
-      alert(`Due Order SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed / Skipped: ${result.failed + result.skipped}`);
+      alert(`Due Order SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed: ${result.failed}\nSkipped: ${result.skipped}`);
     } catch (error) {
       console.error('Failed to send bulk due SMS', error);
       alert(error instanceof Error ? error.message : 'Bulk due SMS failed.');

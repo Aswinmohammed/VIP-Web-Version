@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
 from backend.app.database import SessionLocal, engine, get_db
-from backend.app.models import Base, EmployeeAttendance, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate
+from backend.app.models import Base, EmployeeAttendance, OrderStatus, SmsCampaign, SmsLog, SmsSettings, SmsTemplate, SupplierCheque
 from backend.app.services.files import save_json_backup, save_pdf_export
 from backend.app.services.sms import process_sms_queue
 from backend.app.dependencies import AuthenticatedActor, get_current_actor
@@ -111,7 +111,7 @@ def ensure_tenant_and_branch_consistency() -> None:
                 )
             
             # 4. Repair order items, customers, etc.
-            for table in ["customers", "order_items", "payments", "inventory_items", "employees", "expenses"]:
+            for table in ["customers", "order_items", "payments", "inventory_items", "employees", "expenses", "suppliers", "supplier_purchases", "supplier_payments", "supplier_cheques", "employee_attendance"]:
                 if _table_exists(inspector, table):
                     connection.execute(
                         text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL OR tenant_id <> :tid"),
@@ -193,6 +193,10 @@ def ensure_employee_salary_columns() -> None:
 
 def ensure_employee_attendance_support() -> None:
     Base.metadata.create_all(bind=engine, tables=[EmployeeAttendance.__table__])
+
+
+def ensure_supplier_cheques_support() -> None:
+    Base.metadata.create_all(bind=engine, tables=[SupplierCheque.__table__])
 
 
 def ensure_order_status_support() -> None:
@@ -875,6 +879,7 @@ async def lifespan(_: FastAPI):
     ensure_order_item_index_column()
     ensure_employee_salary_columns()
     ensure_employee_attendance_support()
+    ensure_supplier_cheques_support()
     ensure_master_admin_rls_visibility()
     normalize_order_status_data()
     normalize_user_role_data()

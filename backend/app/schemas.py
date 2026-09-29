@@ -578,6 +578,16 @@ class EmployeeAttendanceRead(BaseModel):
     worked_days: int = 0
 
 
+class EmployeeAttendanceCheckInInput(BaseModel):
+    attendance_date: date | None = None
+    check_in_at: datetime | None = None
+
+
+class EmployeeAttendanceCheckOutInput(BaseModel):
+    attendance_date: date | None = None
+    check_out_at: datetime | None = None
+
+
 class TodayCheckedInEmployeeRead(BaseModel):
     employee_id: uuid.UUID
     employee_name: str
@@ -643,6 +653,40 @@ class SupplierRead(ORMModel):
     joined_date: date | None
     purchases: list[SupplierPurchaseRead]
     payments: list[SupplierPaymentRead]
+
+
+class SupplierChequeInput(BaseModel):
+    id: str | None = None
+    branch_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
+    payee_name: str = Field(min_length=1, max_length=255)
+    cheque_number: str = Field(min_length=1, max_length=128)
+    amount: Decimal = Field(gt=0)
+    cheque_date: date
+    status: str = Field(default="pending")
+    cleared_at: datetime | None = None
+    note: str | None = None
+
+
+class SupplierChequeStatusUpdate(BaseModel):
+    status: str = Field(min_length=1, max_length=32)
+    cleared_at: datetime | None = None
+
+
+class SupplierChequeRead(ORMModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID
+    supplier_id: uuid.UUID | None = None
+    payee_name: str
+    cheque_number: str
+    amount: Decimal
+    cheque_date: date
+    status: str
+    cleared_at: datetime | None = None
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class SmsSettingsUpdate(BaseModel):
@@ -757,17 +801,17 @@ class SmsManualSendRequest(BaseModel):
 
 
 class SmsOrderManualSendRequest(BaseModel):
-    order_id: uuid.UUID
+    order_id: str | uuid.UUID
     phone: str = Field(min_length=5, max_length=64)
     message: str = Field(min_length=1, max_length=1000)
 
 
 class SmsBulkPackedOrderSendRequest(BaseModel):
-    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    order_ids: list[str | uuid.UUID] = Field(min_length=1, max_length=500)
 
 
 class SmsBulkDueOrderSendRequest(BaseModel):
-    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    order_ids: list[str | uuid.UUID] = Field(min_length=1, max_length=500)
 
 
 class SmsManualSendResponse(BaseModel):

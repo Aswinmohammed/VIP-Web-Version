@@ -582,16 +582,18 @@ const CompletedModal: React.FC<CompletedModalProps> = ({ onClose, fromDate, toDa
       );
       if (!confirmed) return;
 
-      const orderIds = completedOrders.map((order) => order.serverId).filter((id): id is string => Boolean(id));
+      const orderIds = completedOrders
+        .map((order) => order.serverId || order.id)
+        .filter((id): id is string => Boolean(id && String(id).trim()));
       if (orderIds.length === 0) {
-        alert('No saved packed orders are available for bulk SMS.');
+        alert('No packed orders available for bulk SMS.');
         return;
       }
 
       setIsSendingAllPackingSms(true);
       try {
         const result = await sendCloudPackedOrdersSms(context.accessToken, { orderIds });
-        alert(`Bulk SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed/Skipped: ${result.failed + result.skipped}`);
+        alert(`Bulk SMS Completed\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed: ${result.failed}\nSkipped: ${result.skipped}`);
       } catch (error) {
         console.error('Failed to send bulk packing SMS', error);
         alert(error instanceof Error ? error.message : 'Bulk SMS failed.');

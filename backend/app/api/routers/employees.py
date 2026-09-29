@@ -13,6 +13,8 @@ from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, apply_branch_scope, ensure_branch_in_tenant, get_current_actor, resolve_branch_scope
 from backend.app.models import Employee, EmployeeAttendance, EmployeeSalaryPayment, EmployeeWorkLog
 from backend.app.schemas import (
+    EmployeeAttendanceCheckInInput,
+    EmployeeAttendanceCheckOutInput,
     EmployeeAttendanceRead,
     EmployeeCreate,
     EmployeeRead,
@@ -145,18 +147,27 @@ def _serialize_attendance(
     )
 
 
-def _get_today_attendance(
+def _get_date_attendance(
     db: Session,
     actor: AuthenticatedActor,
     employee_id: uuid.UUID,
+    target_date: date,
 ) -> EmployeeAttendance | None:
     return db.scalar(
         select(EmployeeAttendance).where(
             EmployeeAttendance.tenant_id == actor.tenant_id,
             EmployeeAttendance.employee_id == employee_id,
-            EmployeeAttendance.attendance_date == _today(),
+            EmployeeAttendance.attendance_date == target_date,
         )
     )
+
+
+def _get_today_attendance(
+    db: Session,
+    actor: AuthenticatedActor,
+    employee_id: uuid.UUID,
+) -> EmployeeAttendance | None:
+    return _get_date_attendance(db, actor, employee_id, _today())
 
 
 def _parse_uuid(value: str) -> uuid.UUID | None:
@@ -453,12 +464,19 @@ def list_today_checked_in_employees(
 @router.post("/{employee_id}/attendance/check-in", response_model=EmployeeAttendanceRead)
 def check_in_employee(
     employee_id: uuid.UUID,
+    payload: EmployeeAttendanceCheckInInput | None = None,
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> EmployeeAttendanceRead:
     employee = _get_employee_or_404(db, actor, employee_id)
-    attendance = _get_today_attendance(db, actor, employee.id)
+    target_date = payload.attendance_date if (payload and payload.attendance_date) else _today()
+    target_time = payload.check_in_at if (payload and payload.check_in_at) else _now()
+
+    attendance = _get_date_attendance(db, actor, employee.id, target_date)
     if attendance and attendance.check_in_at:
+        attendance.check_in_at = target_time
+        db.commit()
+        db.refresh(attendance)
         worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
         return _serialize_attendance(employee, attendance, worked_days)
 
@@ -467,20 +485,22 @@ def check_in_employee(
             tenant_id=actor.tenant_id,
             branch_id=employee.branch_id,
             employee_id=employee.id,
-            attendance_date=_today(),
+            attendance_date=target_date,
             created_by=actor.id,
         )
         db.add(attendance)
 
-    attendance.check_in_at = _now()
+    attendance.check_in_at = target_time
 
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        attendance = _get_today_attendance(db, actor, employee.id)
+        attendance = _get_date_attendance(db, actor, employee.id, target_date)
         if not attendance:
             raise
+        attendance.check_in_at = target_time
+        db.commit()
 
     db.refresh(attendance)
     worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
@@ -490,19 +510,22 @@ def check_in_employee(
 @router.post("/{employee_id}/attendance/check-out", response_model=EmployeeAttendanceRead)
 def check_out_employee(
     employee_id: uuid.UUID,
+    payload: EmployeeAttendanceCheckOutInput | None = None,
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> EmployeeAttendanceRead:
     employee = _get_employee_or_404(db, actor, employee_id)
-    attendance = _get_today_attendance(db, actor, employee.id)
+    target_date = payload.attendance_date if (payload and payload.attendance_date) else _today()
+    target_time = payload.check_out_at if (payload and payload.check_out_at) else _now()
+
+    attendance = _get_date_attendance(db, actor, employee.id, target_date)
     if not attendance or not attendance.check_in_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee must check in before check out")
 
-    if not attendance.check_out_at:
-        attendance.check_out_at = _now()
-        attendance.checked_out_by = actor.id
-        db.commit()
-        db.refresh(attendance)
+    attendance.check_out_at = target_time
+    attendance.checked_out_by = actor.id
+    db.commit()
+    db.refresh(attendance)
 
     worked_days = _attendance_worked_day_counts(db, actor, [employee.id]).get(employee.id, 0)
     return _serialize_attendance(employee, attendance, worked_days)

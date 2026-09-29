@@ -305,15 +305,9 @@ def format_contact_phone(phone: str | None) -> str:
     return cleaned or BRANCH_CONTACT_FALLBACK
 
 
-def render_sms_template(template: str, variables: dict[str, object]) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        value = variables.get(key, "")
-        return str(value) if value is not None else ""
-
-    rendered = _PLACEHOLDER_PATTERN.sub(_replace, template)
+def normalize_sms_message(message: str) -> str:
     normalized_lines: list[str] = []
-    for line in rendered.replace("\r\n", "\n").split("\n"):
+    for line in message.replace("\r\n", "\n").split("\n"):
         if line.strip() == "":
             normalized_lines.append("")
             continue
@@ -333,6 +327,16 @@ def render_sms_template(template: str, variables: dict[str, object]) -> str:
         previous_blank = is_blank
 
     return "\n".join(collapsed_lines).strip()
+
+
+def render_sms_template(template: str, variables: dict[str, object]) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        value = variables.get(key, "")
+        return str(value) if value is not None else ""
+
+    rendered = _PLACEHOLDER_PATTERN.sub(_replace, template)
+    return normalize_sms_message(rendered)
 
 
 def format_currency_for_sms(value: Decimal | int | float | str) -> str:
@@ -1229,19 +1233,23 @@ def record_manual_order_sms(
     db: Session,
     actor: "AuthenticatedActor",
     order: Order,
-    payload: "SmsOrderManualSendRequest",
+    payload: Any,
+    sms_type: str = "manual_order_message",
+    trigger_event: str | None = "manual_order_send",
 ) -> SmsLog:
     customer = getattr(order, "customer", None)
+    phone = getattr(payload, "phone", None) or (customer.phone if customer else None)
+    message_body = getattr(payload, "message", "")
     log = queue_sms_message(
         db,
         tenant_id=actor.tenant_id,
         branch_id=order.branch_id,
         customer=customer,
-        phone=payload.phone,
-        message_body=payload.message,
-        sms_type="manual_due_message",
-        trigger_event="manual_due_send",
-        dedupe_key=f"manual_due_message:{order.id}:{uuid.uuid4().hex}",
+        phone=phone,
+        message_body=message_body,
+        sms_type=sms_type,
+        trigger_event=trigger_event,
+        dedupe_key=f"{sms_type}:{order.id}:{uuid.uuid4().hex}",
         order=order,
     )
     if log.status == SmsLogStatus.QUEUED:

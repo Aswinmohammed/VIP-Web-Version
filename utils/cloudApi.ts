@@ -28,6 +28,7 @@ import {
   SmsTemplate,
   SmsTemplateCategory,
   Supplier,
+  SupplierCheque,
   SupplierPayment,
   SupplierPurchase,
   TenantUser,
@@ -295,6 +296,23 @@ type ApiSupplierPayment = {
   method: 'Cheque' | 'Bank Transfer' | 'Money';
   recorded_at?: string | null;
   note?: string | null;
+};
+
+
+type ApiSupplierCheque = {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  supplier_id?: string | null;
+  payee_name: string;
+  cheque_number: string;
+  amount: number | string;
+  cheque_date: string;
+  status: 'pending' | 'paid';
+  cleared_at?: string | null;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type ApiSupplier = {
@@ -804,6 +822,24 @@ function toSupplierPayment(payment: ApiSupplierPayment): SupplierPayment {
     method: payment.method,
     timestamp: payment.recorded_at || payment.payment_date,
     note: payment.note ?? undefined,
+  };
+}
+
+
+function toSupplierCheque(cheque: ApiSupplierCheque): SupplierCheque {
+  return {
+    id: cheque.id,
+    branchId: cheque.branch_id || undefined,
+    supplierId: cheque.supplier_id || null,
+    payeeName: cheque.payee_name,
+    chequeNumber: cheque.cheque_number,
+    amount: Number(cheque.amount) || 0,
+    chequeDate: cheque.cheque_date ? String(cheque.cheque_date).split('T')[0] : '',
+    status: cheque.status === 'paid' ? 'paid' : 'pending',
+    clearedAt: cheque.cleared_at || null,
+    note: cheque.note || null,
+    createdAt: cheque.created_at || undefined,
+    updatedAt: cheque.updated_at || undefined,
   };
 }
 
@@ -1482,18 +1518,28 @@ export async function fetchCloudTodayAttendance(token: string, branchId?: string
   return response.map(toEmployeeAttendance);
 }
 
-export async function checkInCloudEmployee(token: string, employeeId: string): Promise<EmployeeAttendance> {
+export async function checkInCloudEmployee(
+  token: string,
+  employeeId: string,
+  payload?: { attendance_date?: string; check_in_at?: string }
+): Promise<EmployeeAttendance> {
   const response = await apiRequest<ApiEmployeeAttendance>(`/employees/${employeeId}/attendance/check-in`, {
     method: 'POST',
     headers: jsonHeaders(token),
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   return toEmployeeAttendance(response);
 }
 
-export async function checkOutCloudEmployee(token: string, employeeId: string): Promise<EmployeeAttendance> {
+export async function checkOutCloudEmployee(
+  token: string,
+  employeeId: string,
+  payload?: { attendance_date?: string; check_out_at?: string }
+): Promise<EmployeeAttendance> {
   const response = await apiRequest<ApiEmployeeAttendance>(`/employees/${employeeId}/attendance/check-out`, {
     method: 'POST',
     headers: jsonHeaders(token),
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   return toEmployeeAttendance(response);
 }
@@ -2052,4 +2098,113 @@ export function getCloudInvoiceUrl(order: Order, accessToken: string | null): st
     return null;
   }
   return `${API_BASE}/orders/${order.serverId}/invoice.pdf`;
+}
+
+
+
+export async function fetchCloudSupplierCheques(
+  token: string,
+  params?: { branchId?: string; fromDate?: string; toDate?: string; status?: string; search?: string }
+): Promise<SupplierCheque[]> {
+  const query = new URLSearchParams();
+  if (params?.branchId) query.set('branch_id', params.branchId);
+  if (params?.fromDate) query.set('from_date', params.fromDate);
+  if (params?.toDate) query.set('to_date', params.toDate);
+  if (params?.status) query.set('status', params.status);
+  if (params?.search) query.set('search', params.search);
+  const qStr = query.toString() ? `?${query.toString()}` : '';
+
+  const response = await apiRequest<ApiSupplierCheque[]>(`/suppliers/cheques${qStr}`, {
+    headers: jsonHeaders(token),
+  });
+  return response.map(toSupplierCheque);
+}
+
+export async function createCloudSupplierCheque(
+  token: string,
+  cheque: {
+    branchId?: string;
+    supplierId?: string | null;
+    payeeName: string;
+    chequeNumber: string;
+    amount: number;
+    chequeDate: string;
+    status?: 'pending' | 'paid';
+    clearedAt?: string | null;
+    note?: string | null;
+  }
+): Promise<SupplierCheque> {
+  const response = await apiRequest<ApiSupplierCheque>('/suppliers/cheques', {
+    method: 'POST',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      branch_id: cheque.branchId || null,
+      supplier_id: cheque.supplierId || null,
+      payee_name: cheque.payeeName,
+      cheque_number: cheque.chequeNumber,
+      amount: cheque.amount,
+      cheque_date: cheque.chequeDate,
+      status: cheque.status || 'pending',
+      cleared_at: cheque.clearedAt || null,
+      note: cheque.note || null,
+    }),
+  });
+  return toSupplierCheque(response);
+}
+
+export async function updateCloudSupplierCheque(
+  token: string,
+  chequeId: string,
+  cheque: {
+    branchId?: string;
+    supplierId?: string | null;
+    payeeName: string;
+    chequeNumber: string;
+    amount: number;
+    chequeDate: string;
+    status?: 'pending' | 'paid';
+    clearedAt?: string | null;
+    note?: string | null;
+  }
+): Promise<SupplierCheque> {
+  const response = await apiRequest<ApiSupplierCheque>(`/suppliers/cheques/${encodeURIComponent(chequeId)}`, {
+    method: 'PUT',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      branch_id: cheque.branchId || null,
+      supplier_id: cheque.supplierId || null,
+      payee_name: cheque.payeeName,
+      cheque_number: cheque.chequeNumber,
+      amount: cheque.amount,
+      cheque_date: cheque.chequeDate,
+      status: cheque.status || 'pending',
+      cleared_at: cheque.clearedAt || null,
+      note: cheque.note || null,
+    }),
+  });
+  return toSupplierCheque(response);
+}
+
+export async function updateCloudSupplierChequeStatus(
+  token: string,
+  chequeId: string,
+  status: 'pending' | 'paid',
+  clearedAt?: string | null
+): Promise<SupplierCheque> {
+  const response = await apiRequest<ApiSupplierCheque>(`/suppliers/cheques/${encodeURIComponent(chequeId)}/status`, {
+    method: 'PATCH',
+    headers: jsonHeaders(token),
+    body: JSON.stringify({
+      status,
+      cleared_at: clearedAt || null,
+    }),
+  });
+  return toSupplierCheque(response);
+}
+
+export async function deleteCloudSupplierCheque(token: string, chequeId: string): Promise<void> {
+  await apiRequest<void>(`/suppliers/cheques/${encodeURIComponent(chequeId)}`, {
+    method: 'DELETE',
+    headers: jsonHeaders(token),
+  });
 }

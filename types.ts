@@ -370,6 +370,22 @@ export interface Supplier {
   joinedDate: string;
 }
 
+
+export interface SupplierCheque {
+  id: string;
+  branchId?: string;
+  supplierId?: string | null;
+  payeeName: string;
+  chequeNumber: string;
+  amount: number;
+  chequeDate: string;
+  status: 'pending' | 'paid';
+  clearedAt?: string | null;
+  note?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type UserRole = 'master_admin' | 'branch_admin';
 
 export const ACCESS_AREAS = [

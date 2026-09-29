@@ -6,12 +6,12 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.database import get_db
 from backend.app.dependencies import AuthenticatedActor, get_current_actor, require_master_admin, resolve_branch_scope
-from backend.app.models import Order, SmsCampaign, SmsCampaignStatus, SmsLog, SmsLogStatus, SmsSettings, SmsTemplate
+from backend.app.models import Branch, Order, SmsCampaign, SmsCampaignStatus, SmsLog, SmsLogStatus, SmsSettings, SmsTemplate
 from backend.app.schemas import (
     SmsAnalyticsRead,
     SmsBulkDueOrderSendRequest,
@@ -53,6 +53,15 @@ from backend.app.services.sms import (
 router = APIRouter(prefix="/sms", tags=["sms"])
 
 
+def _has_production_access(db: Session, actor: AuthenticatedActor) -> bool:
+    if actor.role.value == "master_admin":
+        return True
+    if not actor.branch_id:
+        return False
+    branch = db.scalar(select(Branch).where(Branch.id == actor.branch_id, Branch.tenant_id == actor.tenant_id))
+    return bool(branch and branch.is_production_hub)
+
+
 def _campaign_scope_stmt(actor: AuthenticatedActor):
     stmt = select(SmsCampaign).where(SmsCampaign.tenant_id == actor.tenant_id)
     if actor.branch_id and actor.role.value == "branch_admin":
@@ -81,7 +90,20 @@ def _dispatch_campaign_logs(db: Session, campaign_id: uuid.UUID) -> None:
         dispatch_sms_logs_now(db, queued_log_ids)
 
 
-def _get_sms_order_or_404(actor: AuthenticatedActor, db: Session, order_id: uuid.UUID) -> Order:
+def _get_sms_order_or_404(actor: AuthenticatedActor, db: Session, order_id: str | uuid.UUID) -> Order:
+    parsed_uuid = None
+    if isinstance(order_id, uuid.UUID):
+        parsed_uuid = order_id
+    else:
+        try:
+            parsed_uuid = uuid.UUID(str(order_id).strip())
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    filter_cond = (Order.id == parsed_uuid) if parsed_uuid else (
+        or_(Order.order_number == str(order_id).strip(), Order.legacy_id == str(order_id).strip())
+    )
+
     stmt = (
         select(Order)
         .options(
@@ -92,10 +114,10 @@ def _get_sms_order_or_404(actor: AuthenticatedActor, db: Session, order_id: uuid
         )
         .where(
             Order.tenant_id == actor.tenant_id,
-            Order.id == order_id,
+            filter_cond,
         )
     )
-    if actor.branch_id and actor.role.value == "branch_admin":
+    if actor.branch_id and actor.role.value == "branch_admin" and not _has_production_access(db, actor):
         stmt = stmt.where(Order.branch_id == actor.branch_id)
 
     order = db.scalar(stmt)
@@ -233,7 +255,36 @@ def send_packed_order_messages(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> SmsBulkPackedOrderSendResponse:
-    order_ids = list(dict.fromkeys(payload.order_ids))
+    order_ids_raw = list(dict.fromkeys(payload.order_ids))
+    uuid_list: list[uuid.UUID] = []
+    string_list: list[str] = []
+
+    for oid in order_ids_raw:
+        s = str(oid).strip()
+        if not s:
+            continue
+        string_list.append(s)
+        try:
+            uuid_list.append(uuid.UUID(s))
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    query_filters = []
+    if uuid_list:
+        query_filters.append(Order.id.in_(uuid_list))
+    if string_list:
+        query_filters.append(Order.order_number.in_(string_list))
+        query_filters.append(Order.legacy_id.in_(string_list))
+
+    if not query_filters:
+        return SmsBulkPackedOrderSendResponse(
+            total=0,
+            sent=0,
+            failed=0,
+            skipped=0,
+            message="No valid order IDs provided.",
+        )
+
     stmt = (
         select(Order)
         .options(
@@ -244,30 +295,52 @@ def send_packed_order_messages(
         )
         .where(
             Order.tenant_id == actor.tenant_id,
-            Order.id.in_(order_ids),
+            or_(*query_filters),
         )
     )
-    if actor.branch_id and actor.role.value == "branch_admin":
+    if actor.branch_id and actor.role.value == "branch_admin" and not _has_production_access(db, actor):
         stmt = stmt.where(Order.branch_id == actor.branch_id)
 
-    orders_by_id = {order.id: order for order in db.scalars(stmt)}
+    orders_lookup: dict[str, Order] = {}
+    for order in db.scalars(stmt):
+        orders_lookup[str(order.id)] = order
+        if order.order_number:
+            orders_lookup[str(order.order_number)] = order
+        if order.legacy_id:
+            orders_lookup[str(order.legacy_id)] = order
+
     sent = 0
     failed = 0
     skipped = 0
 
-    for order_id in order_ids:
-        order = orders_by_id.get(order_id)
-        raw_status = order.status.value if order is not None and hasattr(order.status, "value") else str(order.status) if order is not None else ""
-        if order is None or raw_status != "Packed":
+    for raw_id in order_ids_raw:
+        order = orders_lookup.get(str(raw_id).strip())
+        if order is None:
+            skipped += 1
+            continue
+
+        raw_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+        if raw_status != "Packed":
+            skipped += 1
+            continue
+
+        customer = getattr(order, "customer", None)
+        phone = customer.phone if customer is not None and customer.phone else ""
+        if not phone.strip():
             skipped += 1
             continue
 
         try:
-            customer = getattr(order, "customer", None)
             message = build_packed_order_manual_message(order, customer)
-            phone = customer.phone if customer is not None else ""
-            manual_payload = SimpleNamespace(phone=phone or "", message=message)
-            log = record_manual_order_sms(db, actor, order, manual_payload)
+            manual_payload = SimpleNamespace(phone=phone.strip(), message=message)
+            log = record_manual_order_sms(
+                db,
+                actor,
+                order,
+                manual_payload,
+                sms_type="packed_order_calling_list",
+                trigger_event="packed_order_send",
+            )
             db.commit()
             if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
                 sent += 1
@@ -281,7 +354,7 @@ def send_packed_order_messages(
 
     failed_or_skipped = failed + skipped
     return SmsBulkPackedOrderSendResponse(
-        total=len(order_ids),
+        total=len(order_ids_raw),
         sent=sent,
         failed=failed,
         skipped=skipped,
@@ -295,7 +368,36 @@ def send_due_order_messages(
     actor: AuthenticatedActor = Depends(get_current_actor),
     db: Session = Depends(get_db),
 ) -> SmsBulkDueOrderSendResponse:
-    order_ids = list(dict.fromkeys(payload.order_ids))
+    order_ids_raw = list(dict.fromkeys(payload.order_ids))
+    uuid_list: list[uuid.UUID] = []
+    string_list: list[str] = []
+
+    for oid in order_ids_raw:
+        s = str(oid).strip()
+        if not s:
+            continue
+        string_list.append(s)
+        try:
+            uuid_list.append(uuid.UUID(s))
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    query_filters = []
+    if uuid_list:
+        query_filters.append(Order.id.in_(uuid_list))
+    if string_list:
+        query_filters.append(Order.order_number.in_(string_list))
+        query_filters.append(Order.legacy_id.in_(string_list))
+
+    if not query_filters:
+        return SmsBulkDueOrderSendResponse(
+            total=0,
+            sent=0,
+            failed=0,
+            skipped=0,
+            message="No valid order IDs provided.",
+        )
+
     stmt = (
         select(Order)
         .options(
@@ -306,30 +408,52 @@ def send_due_order_messages(
         )
         .where(
             Order.tenant_id == actor.tenant_id,
-            Order.id.in_(order_ids),
+            or_(*query_filters),
         )
     )
-    if actor.branch_id and actor.role.value == "branch_admin":
+    if actor.branch_id and actor.role.value == "branch_admin" and not _has_production_access(db, actor):
         stmt = stmt.where(Order.branch_id == actor.branch_id)
 
-    orders_by_id = {order.id: order for order in db.scalars(stmt)}
+    orders_lookup: dict[str, Order] = {}
+    for order in db.scalars(stmt):
+        orders_lookup[str(order.id)] = order
+        if order.order_number:
+            orders_lookup[str(order.order_number)] = order
+        if order.legacy_id:
+            orders_lookup[str(order.legacy_id)] = order
+
     sent = 0
     failed = 0
     skipped = 0
 
-    for order_id in order_ids:
-        order = orders_by_id.get(order_id)
-        raw_status = order.status.value if order is not None and hasattr(order.status, "value") else str(order.status) if order is not None else ""
-        if order is None or raw_status != "Due" or calculate_order_balance(order) <= Decimal("0.00"):
+    for raw_id in order_ids_raw:
+        order = orders_lookup.get(str(raw_id).strip())
+        if order is None:
+            skipped += 1
+            continue
+
+        raw_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+        if raw_status != "Due" or calculate_order_balance(order) <= Decimal("0.00"):
+            skipped += 1
+            continue
+
+        customer = getattr(order, "customer", None)
+        phone = customer.phone if customer is not None and customer.phone else ""
+        if not phone.strip():
             skipped += 1
             continue
 
         try:
-            customer = getattr(order, "customer", None)
             message = build_due_order_manual_message(order, customer)
-            phone = customer.phone if customer is not None else ""
-            manual_payload = SimpleNamespace(phone=phone or "", message=message)
-            log = record_manual_order_sms(db, actor, order, manual_payload)
+            manual_payload = SimpleNamespace(phone=phone.strip(), message=message)
+            log = record_manual_order_sms(
+                db,
+                actor,
+                order,
+                manual_payload,
+                sms_type="due_order_reminder",
+                trigger_event="due_order_send",
+            )
             db.commit()
             if log.status in {SmsLogStatus.SENT, SmsLogStatus.DELIVERED}:
                 sent += 1
@@ -343,7 +467,7 @@ def send_due_order_messages(
 
     failed_or_skipped = failed + skipped
     return SmsBulkDueOrderSendResponse(
-        total=len(order_ids),
+        total=len(order_ids_raw),
         sent=sent,
         failed=failed,
         skipped=skipped,

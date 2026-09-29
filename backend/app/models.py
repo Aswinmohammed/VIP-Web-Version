@@ -414,6 +414,7 @@ class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdM
 
     purchases: Mapped[list["SupplierPurchase"]] = relationship(back_populates="supplier", cascade="all, delete-orphan")
     payments: Mapped[list["SupplierPayment"]] = relationship(back_populates="supplier", cascade="all, delete-orphan")
+    cheques: Mapped[list["SupplierCheque"]] = relationship(back_populates="supplier")
 
 
 class SupplierPurchase(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMixin, Base):
@@ -443,6 +444,25 @@ class SupplierPayment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Le
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     supplier: Mapped["Supplier"] = relationship(back_populates="payments")
+
+
+class SupplierCheque(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, Base):
+    __tablename__ = "supplier_cheques"
+    __table_args__ = (
+        Index("idx_supplier_cheques_tenant_date", "tenant_id", "cheque_date"),
+    )
+
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
+    payee_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    cheque_number: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    cheque_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    supplier: Mapped["Supplier | None"] = relationship(back_populates="cheques")
 
 
 class SmsSettings(UUIDPrimaryKeyMixin, TimestampMixin, TenantScopedMixin, Base):
