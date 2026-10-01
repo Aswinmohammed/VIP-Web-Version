@@ -231,6 +231,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; customerP
       customerName,
       customerPhone: formatPhoneNumber(customerPhone || order.customerPhone || ''),
       dressType: item.dressType,
+      subName: item.subName,
       quantity: item.quantity || 1,
     });
   };
@@ -314,6 +315,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; customerP
                 <div className="flex items-center">
                   <span className="bg-[#111827] text-white rounded-lg w-9 h-9 flex items-center justify-center mr-4 font-black text-sm shadow-md">{item.itemIndex !== undefined ? item.itemIndex + 1 : index + 1}</span>
                   <h3 className="font-black text-[#111827] uppercase tracking-tight text-xl">{item.dressType}</h3>
+                  {item.subName && <span className="ml-3 text-sm font-bold text-slate-500">{item.subName}</span>}
                 </div>
                 <div className="flex items-center gap-3">
                   <button
@@ -433,6 +435,7 @@ const MeasurementModal: React.FC<{ order: Order; customerName: string; customerP
                 <span><span className="bold">Type:</span> {item.dressType}</span>
                 <span><span className="bold">Qty:</span> <span className="bold">{item.quantity}</span></span>
               </div>
+              {item.subName && <div className="flex justify-between mt-1"><span><span className="bold">Sub-name:</span> {item.subName}</span></div>}
               <div className="mt-1">
                 <span className="bold uppercase">Due:</span> {order.dueDate}
               </div>

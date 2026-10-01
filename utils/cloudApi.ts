@@ -104,6 +104,7 @@ type ApiOrderItem = {
   id: string;
   legacy_id?: string | null;
   dress_type: string;
+  sub_name?: string | null;
   inventory_item_id?: string | null;
   cloth_code?: string | null;
   cloth_name?: string | null;
@@ -129,6 +130,7 @@ type ApiPayment = {
   amount: number;
   payment_date: string;
   method?: 'Cash' | 'Card' | 'Bank Transfer' | 'Cheque' | null;
+  sub_name?: string | null;
   note?: string | null;
 };
 
@@ -617,6 +619,7 @@ function toOrderItem(item: ApiOrderItem, measurementsByLegacyId: Map<string, Mea
     id: clientId,
     serverId: item.id,
     dressType: item.dress_type,
+    subName: item.sub_name ?? '',
     inventoryItemId: item.inventory_item_id ?? undefined,
     clothCode: item.cloth_code ?? '',
     clothName: item.cloth_name ?? '',
@@ -644,6 +647,7 @@ function toPayment(payment: ApiPayment): Payment {
     amount: Number(payment.amount),
     date: payment.payment_date,
     method: payment.method ?? undefined,
+    subName: payment.sub_name ?? '',
     note: payment.note ?? '',
   };
 }
@@ -1009,6 +1013,7 @@ function fromPayment(payment: Payment) {
     amount: Number(payment.amount || 0),
     payment_date: payment.date,
     method: payment.method || null,
+    sub_name: payment.subName || null,
     note: payment.note || null,
   };
 }
@@ -1031,6 +1036,7 @@ function fromOrder(order: Order) {
     items: order.items.map((item, i) => ({
       id: item.id,
       dress_type: item.dressType,
+      sub_name: item.subName || null,
       inventory_item_id: isUuid(item.inventoryItemId) ? item.inventoryItemId : null,
       cloth_code: item.clothCode || null,
       cloth_name: item.clothName || null,
@@ -1438,6 +1444,7 @@ export async function addCloudPayment(
     amount: number;
     payment_date: string;  // YYYY-MM-DD
     method: 'Cash' | 'Card' | 'Bank Transfer' | 'Cheque';
+    sub_name?: string;
     note?: string;
   },
 ): Promise<Payment> {
@@ -1450,6 +1457,7 @@ export async function addCloudPayment(
     amount: string | number;
     payment_date: string;
     method?: string | null;
+    sub_name?: string | null;
     note?: string | null;
     created_at?: string | null;
   };
@@ -1460,6 +1468,7 @@ export async function addCloudPayment(
       amount: payment.amount,
       payment_date: payment.payment_date,
       method: payment.method,
+      sub_name: payment.sub_name || null,
       note: payment.note || null,
     }),
   });
@@ -1472,6 +1481,7 @@ export async function addCloudPayment(
     amount: Number(response.amount),
     date: response.payment_date,
     method: (response.method ?? undefined) as Payment['method'],
+    subName: response.sub_name ?? '',
     note: response.note ?? '',
   };
 }

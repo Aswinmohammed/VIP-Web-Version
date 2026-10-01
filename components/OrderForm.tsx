@@ -85,27 +85,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
     Boolean(currentUser.branchId) &&
     item.branchId !== currentUser.branchId
   );
-  const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
-  const availableStatusOptions: Array<{ value: Order['status']; label: string; disabled?: boolean }> = [
-    { value: 'Pending', label: 'Pending' },
-    { value: 'Hold', label: 'Hold' },
-    { value: 'Due', label: 'Due' },
-    { value: 'Delivered', label: 'Delivered' },
-  ];
 
-  if (canManageProductionStatuses) {
-    availableStatusOptions.splice(1, 0,
-      { value: 'In Progress', label: 'In Progress' },
-      { value: 'Completed', label: 'Completed' },
-      { value: 'Packed', label: 'Packed' },
-    );
-  } else if (persistedOrder && blockedStatusValues.includes(persistedOrder.status)) {
-    availableStatusOptions.splice(1, 0, {
-      value: persistedOrder.status,
-      label: `${persistedOrder.status} (Main Branch Controlled)`,
-      disabled: true,
-    });
-  }
+
+  const persistedOrder = orderId ? orders.find((existing) => existing.id === orderId) || null : null;
 
   const initialOrderState: Order = {
     id: '',
@@ -131,10 +113,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const [scanSuccessIndex, setScanSuccessIndex] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [newPayment, setNewPayment] = useState<{ amount: string, date: string, method: 'Cash' | 'Card' | 'Bank Transfer' }>({
+  const [newPayment, setNewPayment] = useState<{ amount: string, date: string, method: 'Cash' | 'Card' | 'Bank Transfer', subName: string }>({
     amount: '',
     date: new Date().toISOString().split('T')[0],
-    method: 'Cash'
+    method: 'Cash',
+    subName: ''
   });
   const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>('amount');
   const [discountInput, setDiscountInput] = useState('0');
@@ -247,8 +230,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
 
   const handleOrderChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
-    if (name === 'status' && !canManageProductionStatuses && blockedStatusValues.includes(value as Order['status'])) {
-      return;
+    if (name === 'status') {
+      if (!canManageProductionStatuses && blockedStatusValues.includes(value as Order['status'])) {
+        return;
+      }
+      if (value === 'Delivered' && balance > 0) {
+        alert(`Cannot mark order as Delivered while there is an outstanding balance of Rs. ${balance.toFixed(2)}. Please click "Add Payment" to settle the balance first.`);
+        return;
+      }
     }
     markDirty();
     setOrder(prev => ({
@@ -510,13 +499,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   };
 
   const handleMeasurementChange = (itemIndex: number, measIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
+    const value = e.target.value;
     markDirty();
     const newItems = [...order.items];
-    newItems[itemIndex].measurements[measIndex] = { ...newItems[itemIndex].measurements[measIndex], [name]: value };
+    newItems[itemIndex].measurements[measIndex] = { ...newItems[itemIndex].measurements[measIndex], value };
     setOrder(prev => ({ ...prev, items: newItems }));
 
-    if (name === 'value' && value.trim() !== '') {
+    if (value && value.trim() !== '') {
       const suggestions = generateMeasurementSuggestions(value);
       if (suggestions.length > 0) {
         setMeasurementInput({ itemIndex, measIndex, isOpen: true, suggestions, selectedIndex: 0 });
@@ -656,19 +645,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const handleAddPayment = () => {
     const amount = parseFloat(newPayment.amount);
     if (!amount || amount <= 0) return;
+    const { balance } = calculateOrderTotals(order);
+    if (amount > balance) {
+      alert(`Payment cannot exceed the balance due of Rs. ${balance.toFixed(2)}.`);
+      return;
+    }
     const payment: Payment = {
       id: createClientId('PAY'),
       branchId: order.branchId,
       collectorId: currentUser?.id || 'SYSTEM',
       amount: amount,
       date: newPayment.date,
-      method: newPayment.method
+      method: newPayment.method,
+      subName: newPayment.subName || undefined,
     };
     const updatedPayments = [...(order.payments || []), payment];
     const totalPaid = updatedPayments.reduce((sum, p) => sum + p.amount, 0);
     markDirty();
     setOrder(prev => ({ ...prev, payments: updatedPayments, advance: totalPaid }));
-    setNewPayment({ amount: '', date: new Date().toISOString().split('T')[0], method: 'Cash' });
+    setNewPayment({ amount: '', date: new Date().toISOString().split('T')[0], method: 'Cash', subName: '' });
   };
 
   const handleRemovePayment = (paymentId: string) => {
@@ -818,6 +813,46 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
   const { itemsTotal: grandTotal, finalAmount: roundedFinalAmount, paid: totalPaid, balance } = useMemo(() => {
     return calculateOrderTotals(order);
   }, [order]);
+
+  const orderSubNames = useMemo(() => Array.from(new Set(
+    order.items.map((item) => item.subName?.trim()).filter((name): name is string => Boolean(name))
+  )), [order.items]);
+
+  const availableStatusOptions = useMemo(() => {
+    const options: Array<{ value: Order['status']; label: string; disabled?: boolean }> = [
+      { value: 'Pending', label: 'Pending' },
+      { value: 'Hold', label: 'Hold' },
+      { value: 'Due', label: 'Due' },
+      {
+        value: 'Delivered',
+        label: balance > 0 ? 'Delivered (Balance Due)' : 'Delivered',
+        disabled: balance > 0,
+      },
+    ];
+
+    if (canManageProductionStatuses) {
+      options.splice(1, 0,
+        { value: 'In Progress', label: 'In Progress' },
+        { value: 'Completed', label: 'Completed' },
+        { value: 'Packed', label: 'Packed' },
+      );
+    } else if (persistedOrder && blockedStatusValues.includes(persistedOrder.status)) {
+      options.splice(1, 0, {
+        value: persistedOrder.status,
+        label: `${persistedOrder.status} (Main Branch Controlled)`,
+        disabled: true,
+      });
+    }
+
+    return options;
+  }, [canManageProductionStatuses, persistedOrder, blockedStatusValues, balance]);
+
+  useEffect(() => {
+    setNewPayment((previous) => {
+      const amount = balance > 0 ? balance.toFixed(2) : '';
+      return previous.amount === amount ? previous : { ...previous, amount };
+    });
+  }, [balance]);
 
   useEffect(() => {
     if (discountMode !== 'percent') {
@@ -1021,6 +1056,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                     )}
                   </div>
 
+                  <div className="min-w-[180px] flex-1">
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Sub-name</label>
+                    <input
+                      type="text"
+                      name="subName"
+                      value={item.subName || ''}
+                      onChange={e => handleItemChange(itemIndex, e)}
+                      placeholder="Person wearing this dress"
+                      className="block w-full rounded-md border border-gray-300 bg-white py-1.5 px-3 text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                    />
+                  </div>
+
                   {/* Material / Cloth Search + Barcode Scanner */}
                   <div className="min-w-[240px] flex-1 relative inventory-dropdown">
                     <label className="mb-1 block text-xs font-medium text-gray-500">Cloth / Material</label>
@@ -1171,9 +1218,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                             {/* <span className="text-[10px] font-bold text-gray-400 mr-2 uppercase">{meas.name}:</span> */}
                             <input
                               type="text"
-                              name="value"
+                              name={`meas_val_${itemIndex}_${measIndex}`}
                               placeholder="Value"
                               value={meas.value}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              spellCheck={false}
                               data-measurement-input={`${itemIndex}-${measIndex}`}
                               onChange={e => handleMeasurementChange(itemIndex, measIndex, e)}
                               onKeyDown={e => handleMeasurementKeyDown(e, itemIndex, measIndex)}
@@ -1327,7 +1378,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                               p.method === 'Card' ? 'bg-orange-100 text-orange-700' :
                                 'bg-green-100 text-green-700'
                               }`}>
-                              {p.method || 'Cash'}
+                              {p.method || 'Cash'}{p.subName ? ` (${p.subName})` : ''}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-sm text-gray-700 text-right font-bold">Rs. {p.amount.toFixed(2)}</td>
@@ -1351,11 +1402,19 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
               <div className="bg-[#f0f7ff] p-4 rounded-xl border border-blue-100 shadow-sm space-y-4">
                 <div className="flex gap-4 items-end">
                   <div className="flex-1">
-                    <label className="block text-sm font-bold text-blue-600 mb-1">Amount</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-bold text-blue-600">Amount</label>
+                      {balance > 0 && (
+                        <span className="text-xs font-bold text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                          Auto-filled Balance Due
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="number"
                       value={newPayment.amount}
                       onChange={e => setNewPayment({ ...newPayment, amount: e.target.value })}
+                      max={balance}
                       className="block w-full bg-white border-2 border-slate-900 rounded-lg py-2.5 px-3 text-lg font-bold text-slate-800 focus:ring-0 focus:border-blue-600 transition-all outline-none md:max-w-md"
                       placeholder="0.00"
                     />
@@ -1394,6 +1453,15 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
                       {m}
                     </button>
                   ))}
+                  <select
+                    value={newPayment.subName}
+                    onChange={e => setNewPayment({ ...newPayment, subName: e.target.value })}
+                    className="min-w-[180px] bg-white border-2 border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
+                    aria-label="Sub-name for this payment"
+                  >
+                    <option value="">No sub-name</option>
+                    {orderSubNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
                 </div>
               </div>
             </div>
@@ -1466,11 +1534,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ orderId, navigate }) => {
           </button>
           <button
             type="button"
+            disabled={balance > 0}
             onClick={() => {
+              if (balance > 0) {
+                alert(`Cannot deliver order with an outstanding balance of Rs. ${balance.toFixed(2)}. Please click "Add Payment" first.`);
+                return;
+              }
               markDirty();
               setOrder(prev => ({ ...prev, status: 'Delivered' }));
             }}
-            className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 ${order.status === 'Delivered' ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-green-600 text-green-600 hover:bg-green-50'}`}
+            title={balance > 0 ? `Settle the outstanding Rs. ${balance.toFixed(2)} payment before delivering.` : 'Mark order as delivered'}
+            className={`flex items-center px-6 py-2.5 rounded-md font-bold transition-all border-2 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 ${order.status === 'Delivered' ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-green-600 text-green-600 hover:bg-green-50'}`}
           >
             Deliver
           </button>

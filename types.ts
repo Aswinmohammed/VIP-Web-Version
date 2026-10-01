@@ -161,6 +161,7 @@ export interface OrderItem {
   id: string;
   serverId?: string;
   dressType: DressType | string;
+  subName?: string;
   inventoryItemId?: string;
   clothCode?: string;
   clothName?: string;
@@ -188,6 +189,7 @@ export interface Payment {
   amount: number;
   date: string;
   method?: 'Cash' | 'Card' | 'Bank Transfer' | 'Cheque';
+  subName?: string;
   note?: string;
 }
 

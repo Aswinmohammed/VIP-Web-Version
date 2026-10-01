@@ -115,6 +115,22 @@ const SupplierManagement: React.FC = () => {
 
     const calculateTotalPurchases = (purchases: SupplierPurchase[] = []) => purchases.reduce((sum, p) => sum + p.amount, 0);
     const calculateTotalPaid = (payments: SupplierPayment[] = []) => payments.reduce((sum, p) => sum + p.amount, 0);
+    const normaliseSupplierName = (name: string) => name.trim().toLocaleLowerCase();
+    const chequeBelongsToSupplier = (cheque: SupplierCheque, supplier: Supplier) => {
+        if (cheque.supplierId) return cheque.supplierId === supplier.id;
+
+        // Legacy cheques may not have a supplier ID, so match their payee name within the same branch.
+        return (!cheque.branchId || cheque.branchId === supplier.branchId)
+            && normaliseSupplierName(cheque.payeeName) === normaliseSupplierName(supplier.name);
+    };
+    const calculatePaidCheques = (supplier: Supplier, fromDate = '', toDate = '') => cheques
+        .filter((cheque) => cheque.status === 'paid'
+            && chequeBelongsToSupplier(cheque, supplier)
+            && (!fromDate || cheque.chequeDate >= fromDate)
+            && (!toDate || cheque.chequeDate <= toDate))
+        .reduce((sum, cheque) => sum + cheque.amount, 0);
+    const calculateSupplierTotalPaid = (supplier: Supplier) =>
+        calculateTotalPaid(supplier.payments) + calculatePaidCheques(supplier);
 
     const filteredSuppliers = useMemo(() => {
         const list = [...suppliers].reverse();
@@ -234,14 +250,19 @@ const SupplierManagement: React.FC = () => {
             return;
         }
 
+        const enteredPayeeName = chequeForm.payeeName.trim();
+        const scopedBranchId = getScopedBranchQuery();
         const matchedSupplier = suppliers.find(
-            (s) => s.name.trim().toLowerCase() === chequeForm.payeeName.trim().toLowerCase()
+            (supplier) => supplier.branchId === scopedBranchId
+                && normaliseSupplierName(supplier.name) === normaliseSupplierName(enteredPayeeName)
+        ) || suppliers.find(
+            (supplier) => normaliseSupplierName(supplier.name) === normaliseSupplierName(enteredPayeeName)
         );
 
         const payload = {
-            branchId: getScopedBranchQuery() || (suppliers[0]?.branchId) || undefined,
+            branchId: scopedBranchId || matchedSupplier?.branchId || (suppliers[0]?.branchId) || undefined,
             supplierId: matchedSupplier?.id || null,
-            payeeName: chequeForm.payeeName.trim(),
+            payeeName: matchedSupplier?.name || enteredPayeeName,
             chequeNumber: chequeForm.chequeNumber.trim(),
             amount: amt,
             chequeDate: chequeForm.chequeDate,
@@ -953,7 +974,8 @@ const SupplierManagement: React.FC = () => {
         });
 
         const currentPurchases = calculateTotalPurchases(filteredPurchases);
-        const currentPaid = calculateTotalPaid(filteredPayments);
+        const currentPaidCheques = calculatePaidCheques(selectedSupplier, dateFilter.from, dateFilter.to);
+        const currentPaid = calculateTotalPaid(filteredPayments) + currentPaidCheques;
         const currentBalance = currentPurchases - currentPaid;
 
         return (
@@ -996,8 +1018,9 @@ const SupplierManagement: React.FC = () => {
                         <p className="text-3xl font-bold text-gray-800">Rs. {currentPurchases.toLocaleString()}</p>
                     </div>
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <p className="text-sm font-medium text-gray-500 mb-1">{dateFilter.from || dateFilter.to ? 'Filtered Paid' : 'Total Paid'}</p>
+                        <p className="text-sm font-medium text-gray-500 mb-1">{dateFilter.from || dateFilter.to ? 'Filtered Paid' : 'Total Paid (incl. cleared cheques)'}</p>
                         <p className="text-3xl font-bold text-emerald-600">Rs. {currentPaid.toLocaleString()}</p>
+                        {currentPaidCheques > 0 && <p className="mt-1 text-xs font-semibold text-emerald-600">Rs. {currentPaidCheques.toLocaleString()} from cleared cheques</p>}
                     </div>
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <p className="text-sm font-medium text-gray-500 mb-1">{dateFilter.from || dateFilter.to ? 'Filtered Balance Due' : 'Balance Due'}</p>
@@ -1236,7 +1259,7 @@ const SupplierManagement: React.FC = () => {
                 >
                     <div>
                         <p className="text-sm font-medium text-gray-500 mb-1">Total Paid</p>
-                        <p className="text-3xl font-bold text-gray-800">Rs. {suppliers.reduce((sum, s) => sum + calculateTotalPaid(s.payments), 0).toLocaleString()}</p>
+                        <p className="text-3xl font-bold text-gray-800">Rs. {suppliers.reduce((sum, s) => sum + calculateSupplierTotalPaid(s), 0).toLocaleString()}</p>
                     </div>
                     <div className="p-4 rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 transition-transform group-hover:scale-110">
                         <Banknote size={24} />
@@ -1249,7 +1272,7 @@ const SupplierManagement: React.FC = () => {
                 >
                     <div>
                         <p className="text-sm font-medium text-gray-500 mb-1">Grand Balance Due</p>
-                        <p className="text-3xl font-bold text-gray-800">Rs. {suppliers.reduce((sum, s) => sum + (calculateTotalPurchases(s.purchases) - calculateTotalPaid(s.payments)), 0).toLocaleString()}</p>
+                        <p className="text-3xl font-bold text-gray-800">Rs. {suppliers.reduce((sum, s) => sum + (calculateTotalPurchases(s.purchases) - calculateSupplierTotalPaid(s)), 0).toLocaleString()}</p>
                     </div>
                     <div className="p-4 rounded-full bg-red-600 text-white shadow-lg shadow-red-600/20 transition-transform group-hover:scale-110">
                         <DollarSign size={24} />
@@ -1266,7 +1289,7 @@ const SupplierManagement: React.FC = () => {
             <div className="space-y-4 md:hidden">
                 {filteredSuppliers.length > 0 ? filteredSuppliers.map((supplier) => {
                     const totalPurchased = calculateTotalPurchases(supplier.purchases);
-                    const totalPaid = calculateTotalPaid(supplier.payments);
+                    const totalPaid = calculateSupplierTotalPaid(supplier);
                     const balance = totalPurchased - totalPaid;
 
                     return (
@@ -1337,7 +1360,7 @@ const SupplierManagement: React.FC = () => {
                         <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                             {filteredSuppliers.map((s) => {
                                 const totalPurchased = calculateTotalPurchases(s.purchases);
-                                const totalPaid = calculateTotalPaid(s.payments);
+                                const totalPaid = calculateSupplierTotalPaid(s);
                                 const balance = totalPurchased - totalPaid;
 
                                 return (
@@ -1455,8 +1478,8 @@ const SupplierManagement: React.FC = () => {
                                         const amount = breakdownModal === 'purchase' 
                                             ? calculateTotalPurchases(s.purchases) 
                                             : breakdownModal === 'paid' 
-                                            ? calculateTotalPaid(s.payments) 
-                                            : calculateTotalPurchases(s.purchases) - calculateTotalPaid(s.payments);
+                                            ? calculateSupplierTotalPaid(s)
+                                            : calculateTotalPurchases(s.purchases) - calculateSupplierTotalPaid(s);
                                         
                                         if (amount === 0) return null;
 
@@ -1478,8 +1501,8 @@ const SupplierManagement: React.FC = () => {
                                                 const amount = breakdownModal === 'purchase' 
                                                     ? calculateTotalPurchases(s.purchases) 
                                                     : breakdownModal === 'paid' 
-                                                    ? calculateTotalPaid(s.payments) 
-                                                    : calculateTotalPurchases(s.purchases) - calculateTotalPaid(s.payments);
+                                                    ? calculateSupplierTotalPaid(s)
+                                                    : calculateTotalPurchases(s.purchases) - calculateSupplierTotalPaid(s);
                                                 return sum + amount;
                                             }, 0).toLocaleString()}
                                         </td>

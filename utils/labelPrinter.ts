@@ -8,6 +8,7 @@ export interface LabelData {
   customerName: string;
   customerPhone: string;
   dressType: string;
+  subName?: string;
   quantity: number;
 }
 
@@ -61,7 +62,7 @@ const openPrintWindow = (html: string, title: string): boolean => {
 };
 
 export const generateLabelHTML = (labelData: LabelData): string => {
-  const { orderId, customerName, customerPhone } = labelData;
+  const { orderId, customerName, customerPhone, subName } = labelData;
 
   return `
     <!DOCTYPE html>
@@ -104,6 +105,12 @@ export const generateLabelHTML = (labelData: LabelData): string => {
           width: 100%;
         }
 
+        .sub-name {
+          font-size: 12px;
+          font-weight: bold;
+          margin-bottom: 1px;
+        }
+
         .order-id {
           font-size: 22px;
           font-weight: 900;
@@ -120,6 +127,7 @@ export const generateLabelHTML = (labelData: LabelData): string => {
     </head>
     <body>
       <div class="customer-name">${escapeHtml(customerName.toUpperCase())}</div>
+      ${subName ? `<div class="sub-name">${escapeHtml(subName.toUpperCase())}</div>` : ''}
       <div class="order-id">${escapeHtml(orderId)}</div>
       <div class="customer-phone">${escapeHtml(customerPhone)}</div>
     </body>

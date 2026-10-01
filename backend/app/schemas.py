@@ -193,6 +193,7 @@ class MeasurementSetRead(ORMModel):
 class OrderItemInput(BaseModel):
     id: str | None = None
     dress_type: str
+    sub_name: str | None = Field(default=None, max_length=255)
     inventory_item_id: uuid.UUID | None = None
     cloth_code: str | None = None
     cloth_name: str | None = None
@@ -214,6 +215,7 @@ class OrderItemRead(ORMModel):
     id: uuid.UUID
     legacy_id: str | None
     dress_type: str
+    sub_name: str | None
     inventory_item_id: uuid.UUID | None
     cloth_code: str | None
     cloth_name: str | None
@@ -235,6 +237,7 @@ class PaymentInput(BaseModel):
     amount: Decimal = Field(ge=0)
     payment_date: date
     method: PaymentMethod | None = None
+    sub_name: str | None = Field(default=None, max_length=255)
     note: str | None = None
 
 
@@ -244,6 +247,7 @@ class PaymentRead(ORMModel):
     amount: Decimal
     payment_date: date
     method: PaymentMethod | None
+    sub_name: str | None
     note: str | None
     collector_user_id: uuid.UUID | None
     branch_id: uuid.UUID

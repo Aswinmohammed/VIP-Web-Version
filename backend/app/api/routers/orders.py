@@ -204,6 +204,7 @@ def _serialize_order(order: Order, include_measurements: bool = True) -> dict:
                 "id": item.id,
                 "legacy_id": item.legacy_id,
                 "dress_type": item.dress_type,
+                "sub_name": item.sub_name,
                 "inventory_item_id": item.inventory_item_id,
                 "cloth_code": item.cloth_code,
                 "cloth_name": item.cloth_name,
@@ -229,6 +230,7 @@ def _serialize_order(order: Order, include_measurements: bool = True) -> dict:
                 "amount": payment.amount,
                 "payment_date": payment.payment_date,
                 "method": payment.method,
+                "sub_name": payment.sub_name,
                 "note": payment.note,
                 "collector_user_id": payment.collector_user_id,
                 "branch_id": payment.branch_id,
@@ -370,6 +372,7 @@ def _replace_order_payload(db: Session, actor: AuthenticatedActor, order: Order,
             order_id=order.id,
             legacy_id=item_payload.id,
             dress_type=item_payload.dress_type,
+            sub_name=item_payload.sub_name,
             inventory_item_id=item_payload.inventory_item_id,
             cloth_code=item_payload.cloth_code,
             cloth_name=item_payload.cloth_name,
@@ -399,6 +402,7 @@ def _replace_order_payload(db: Session, actor: AuthenticatedActor, order: Order,
                 amount=payment_payload.amount,
                 payment_date=payment_payload.payment_date,
                 method=payment_payload.method,
+                sub_name=payment_payload.sub_name,
                 note=payment_payload.note,
             )
         )
@@ -605,6 +609,7 @@ def create_order(
             branch_id=scoped_branch_id,
             order_id=order.id,
             dress_type=item_payload.dress_type,
+            sub_name=item_payload.sub_name,
             inventory_item_id=item_payload.inventory_item_id,
             cloth_code=item_payload.cloth_code,
             cloth_name=item_payload.cloth_name,
@@ -637,6 +642,7 @@ def create_order(
             amount=payment_payload.amount,
             payment_date=payment_payload.payment_date,
             method=payment_payload.method,
+            sub_name=payment_payload.sub_name,
             note=payment_payload.note,
         )
         db.add(payment)
@@ -749,6 +755,7 @@ def add_payment(
         amount=payload.amount,
         payment_date=payload.payment_date,
         method=payload.method,
+        sub_name=payload.sub_name,
         note=payload.note,
     )
     db.add(payment)

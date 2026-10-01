@@ -208,6 +208,7 @@ class OrderItem(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyId
 
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
     dress_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    sub_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     inventory_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True, index=True)
     cloth_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     cloth_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -270,6 +271,7 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, BranchScopedMixin, LegacyIdMi
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     payment_date: Mapped[date] = mapped_column(Date, nullable=False)
     method: Mapped[PaymentMethod | None] = mapped_column(Enum(PaymentMethod, name="payment_method", values_callable=lambda x: [e.value for e in x]), nullable=True)
+    sub_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     order: Mapped["Order"] = relationship(back_populates="payments")
