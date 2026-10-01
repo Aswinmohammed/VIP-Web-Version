@@ -10,7 +10,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from backend.app.database import engine
-from backend.app.main import ensure_branch_access_columns, ensure_employee_salary_columns, ensure_order_status_support, settings
+from backend.app.main import (
+    ensure_branch_access_columns,
+    ensure_employee_salary_columns,
+    ensure_order_status_support,
+    ensure_order_sub_name_columns,
+    settings,
+)
 from backend.app.models import Base
 
 
@@ -33,6 +39,7 @@ def main() -> None:
         print("Created any missing tables from SQLAlchemy metadata.")
 
     ensure_branch_access_columns()
+    ensure_order_sub_name_columns()
     ensure_employee_salary_columns()
     ensure_order_status_support()
     print("Applied compatibility bootstrap for branch, employee, and order status schema updates.")

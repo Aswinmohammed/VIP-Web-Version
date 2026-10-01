@@ -157,6 +157,34 @@ def ensure_order_item_index_column() -> None:
         for statement in statements:
             connection.execute(text(statement))
 
+
+def ensure_order_sub_name_columns() -> None:
+    """Keep existing databases compatible with the order item model.
+
+    Alembic is the primary schema migration mechanism. This small, idempotent
+    repair prevents the orders endpoint from failing if a legacy database was
+    deployed before its Alembic revision was recorded.
+    """
+    inspector = inspect(engine)
+    statements = []
+    for table_name in ("order_items", "payments"):
+        if not _table_exists(inspector, table_name):
+            continue
+        column_names = {column["name"] for column in inspector.get_columns(table_name)}
+        if "sub_name" not in column_names:
+            if engine.dialect.name == "postgresql":
+                statements.append(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS sub_name VARCHAR(255)")
+            else:
+                statements.append(f"ALTER TABLE {table_name} ADD COLUMN sub_name VARCHAR(255)")
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def ensure_employee_salary_columns() -> None:
     inspector = inspect(engine)
     if not _table_exists(inspector, "employees"):
@@ -877,6 +905,7 @@ async def lifespan(_: FastAPI):
         Base.metadata.create_all(bind=engine)
     ensure_branch_access_columns()
     ensure_order_item_index_column()
+    ensure_order_sub_name_columns()
     ensure_employee_salary_columns()
     ensure_employee_attendance_support()
     ensure_supplier_cheques_support()

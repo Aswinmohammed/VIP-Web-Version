@@ -6,7 +6,6 @@ Create Date: 2026-10-01 00:00:00.000000
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision = "0002_add_order_sub_names"
@@ -16,8 +15,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("order_items", sa.Column("sub_name", sa.String(length=255), nullable=True))
-    op.add_column("payments", sa.Column("sub_name", sa.String(length=255), nullable=True))
+    # Some hosted databases were created before Alembic was run during deploy.
+    # Make this revision safe when a manual compatibility repair already added a
+    # column, while still recording the Alembic revision.
+    op.execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS sub_name VARCHAR(255)")
+    op.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS sub_name VARCHAR(255)")
 
 
 def downgrade() -> None:
